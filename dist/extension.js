@@ -34,10 +34,10 @@ __export(extension_exports, {
   deactivate: () => deactivate
 });
 module.exports = __toCommonJS(extension_exports);
-var vscode2 = __toESM(require("vscode"));
+var vscode3 = __toESM(require("vscode"));
 var import_child_process = require("child_process");
-var fs = __toESM(require("fs"));
-var nodePath = __toESM(require("path"));
+var fs2 = __toESM(require("fs"));
+var nodePath2 = __toESM(require("path"));
 
 // src/chatSessions.ts
 var SESSIONS_KEY = "ollamaCoderChat.sessions.v2";
@@ -1337,6 +1337,169 @@ body {
   }
 };
 
+// src/updater.ts
+var vscode2 = __toESM(require("vscode"));
+var https2 = __toESM(require("https"));
+var fs = __toESM(require("fs"));
+var os = __toESM(require("os"));
+var nodePath = __toESM(require("path"));
+var RELEASES_API = "https://api.github.com/repos/Spiritbocs/OllamaUnofficial/releases/latest";
+var RELEASES_PAGE = "https://github.com/Spiritbocs/OllamaUnofficial/releases";
+var USER_AGENT = "OllamaUnofficial-UpdateChecker/1.0";
+function isNewer(a, b) {
+  const parse = (v) => v.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
+  const [aMaj, aMin, aPat] = parse(a);
+  const [bMaj, bMin, bPat] = parse(b);
+  if (aMaj !== bMaj) return aMaj > bMaj;
+  if (aMin !== bMin) return aMin > bMin;
+  return aPat > bPat;
+}
+function fetchJson(url, redirects = 3) {
+  return new Promise((resolve, reject) => {
+    const req = https2.get(url, { headers: { "User-Agent": USER_AGENT }, timeout: 1e4 }, (res) => {
+      if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) && res.headers.location && redirects > 0) {
+        resolve(fetchJson(res.headers.location, redirects - 1));
+        return;
+      }
+      if (res.statusCode !== 200) {
+        reject(new Error(`HTTP ${res.statusCode ?? "unknown"}`));
+        return;
+      }
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString("utf-8")));
+        } catch (e) {
+          reject(e);
+        }
+      });
+      res.on("error", reject);
+    });
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Timeout"));
+    });
+  });
+}
+function downloadFile(url, destPath, redirects = 5) {
+  return new Promise((resolve, reject) => {
+    const req = https2.get(
+      url,
+      { headers: { "User-Agent": USER_AGENT }, timeout: 6e4 },
+      (res) => {
+        if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) && res.headers.location && redirects > 0) {
+          resolve(downloadFile(res.headers.location, destPath, redirects - 1));
+          return;
+        }
+        if (res.statusCode !== 200) {
+          reject(new Error(`Download failed: HTTP ${res.statusCode ?? "unknown"}`));
+          return;
+        }
+        const file = fs.createWriteStream(destPath);
+        res.pipe(file);
+        file.on("finish", () => {
+          file.close();
+          resolve();
+        });
+        file.on("error", (err) => {
+          fs.unlink(destPath, () => void 0);
+          reject(err);
+        });
+        res.on("error", (err) => {
+          fs.unlink(destPath, () => void 0);
+          reject(err);
+        });
+      }
+    );
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Download timed out"));
+    });
+  });
+}
+async function installUpdate(downloadUrl, filename, log) {
+  const tmpPath = nodePath.join(os.tmpdir(), filename);
+  log.appendLine(`[updater] Downloading ${downloadUrl} \u2192 ${tmpPath}`);
+  await vscode2.window.withProgress(
+    {
+      location: vscode2.ProgressLocation.Notification,
+      title: `Downloading OllamaUnofficial ${filename}\u2026`,
+      cancellable: false
+    },
+    async () => {
+      await downloadFile(downloadUrl, tmpPath);
+    }
+  );
+  log.appendLine("[updater] Download complete. Installing\u2026");
+  try {
+    await vscode2.commands.executeCommand(
+      "workbench.extensions.installExtension",
+      vscode2.Uri.file(tmpPath)
+    );
+  } finally {
+    setTimeout(() => {
+      try {
+        fs.unlinkSync(tmpPath);
+      } catch {
+      }
+    }, 5e3);
+  }
+  const reload = await vscode2.window.showInformationMessage(
+    "\u2705 OllamaUnofficial updated! Reload VS Code to apply the new version.",
+    "Reload Now",
+    "Later"
+  );
+  if (reload === "Reload Now") {
+    await vscode2.commands.executeCommand("workbench.action.reloadWindow");
+  }
+}
+function checkForUpdates(context, log) {
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const ext = vscode2.extensions.getExtension("Spiritbocs.ollamaunofficial") ?? vscode2.extensions.getExtension("undefined_publisher.ollamaunofficial");
+        const currentVersion = ext?.packageJSON?.["version"] ?? "0.0.0";
+        log.appendLine(`[updater] Current version: ${currentVersion}`);
+        const data = await fetchJson(RELEASES_API);
+        const latestTag = data.tag_name ?? "";
+        const latestVersion = latestTag.replace(/^v/, "");
+        if (!latestVersion) {
+          log.appendLine("[updater] Could not parse latest version from GitHub.");
+          return;
+        }
+        log.appendLine(`[updater] Latest on GitHub: ${latestTag}`);
+        if (!isNewer(latestVersion, currentVersion)) {
+          log.appendLine("[updater] Already up to date.");
+          return;
+        }
+        const vsixAsset = data.assets?.find((a) => a.name.endsWith(".vsix"));
+        log.appendLine(`[updater] Update available: v${currentVersion} \u2192 ${latestTag}`);
+        const choice = await vscode2.window.showInformationMessage(
+          `\u{1F680} OllamaUnofficial ${latestTag} is available! (you have v${currentVersion})`,
+          "Install Now",
+          "View Release",
+          "Later"
+        );
+        if (choice === "Install Now") {
+          if (!vsixAsset) {
+            void vscode2.window.showWarningMessage("Could not find the .vsix file in the release. Opening the release page instead.");
+            void vscode2.env.openExternal(vscode2.Uri.parse(data.html_url ?? RELEASES_PAGE));
+            return;
+          }
+          await installUpdate(vsixAsset.browser_download_url, vsixAsset.name, log);
+        } else if (choice === "View Release") {
+          void vscode2.env.openExternal(vscode2.Uri.parse(data.html_url ?? RELEASES_PAGE));
+        }
+      } catch (err) {
+        log.appendLine(`[updater] Check skipped: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    })();
+  }, 8e3);
+}
+
 // src/extension.ts
 var HF_SUGGESTED_MODELS = [
   "Qwen/Qwen2.5-Coder-7B-Instruct",
@@ -1348,7 +1511,7 @@ var HF_SUGGESTED_MODELS = [
 var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
   constructor(context) {
     this.context = context;
-    this.log = vscode2.window.createOutputChannel("OllamaUnofficial");
+    this.log = vscode3.window.createOutputChannel("OllamaUnofficial");
     context.subscriptions.push(this.log);
     const loaded = loadSessions(this.context.globalState);
     this.sessions = loaded.sessions;
@@ -1371,6 +1534,9 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
   progressProvider;
   setProgressProvider(p) {
     this.progressProvider = p;
+  }
+  getLog() {
+    return this.log;
   }
   getActiveSession() {
     return this.sessions.find((s) => s.id === this.activeSessionId);
@@ -1434,7 +1600,7 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
   }
   closeSession(id) {
     if (this.sessions.length <= 1) {
-      void vscode2.window.showInformationMessage("Keep at least one chat tab.");
+      void vscode3.window.showInformationMessage("Keep at least one chat tab.");
       return;
     }
     const idx = this.sessions.findIndex((s) => s.id === id);
@@ -1464,8 +1630,8 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [
-        vscode2.Uri.joinPath(this.context.extensionUri, "dist"),
-        vscode2.Uri.joinPath(this.context.extensionUri, "media")
+        vscode3.Uri.joinPath(this.context.extensionUri, "dist"),
+        vscode3.Uri.joinPath(this.context.extensionUri, "media")
       ]
     };
     webviewView.webview.onDidReceiveMessage(
@@ -1475,7 +1641,7 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
         } catch (error) {
           const text = error instanceof Error ? error.message : "Unexpected error in extension host.";
           this.log.appendLine(`[error] ${text}`);
-          void vscode2.window.showErrorMessage(`OllamaUnofficial: ${text}`);
+          void vscode3.window.showErrorMessage(`OllamaUnofficial: ${text}`);
         }
       },
       void 0,
@@ -1509,7 +1675,7 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
     });
   }
   async postSettingsSnapshot() {
-    const c = vscode2.workspace.getConfiguration("ollamaCoderChat");
+    const c = vscode3.workspace.getConfiguration("ollamaCoderChat");
     const [openRouterKey, huggingfaceKey] = await Promise.all([
       this.context.secrets.get(SECRET_OPENROUTER),
       this.context.secrets.get(SECRET_HUGGINGFACE)
@@ -1535,50 +1701,50 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
     if (message.huggingfaceKey?.trim()) {
       await this.context.secrets.store(SECRET_HUGGINGFACE, message.huggingfaceKey.trim());
     }
-    const config = vscode2.workspace.getConfiguration("ollamaCoderChat");
+    const config = vscode3.workspace.getConfiguration("ollamaCoderChat");
     if (typeof message.temperature === "number" && Number.isFinite(message.temperature)) {
       await config.update(
         "temperature",
         Math.min(2, Math.max(0, message.temperature)),
-        vscode2.ConfigurationTarget.Global
+        vscode3.ConfigurationTarget.Global
       );
     }
     if (typeof message.maxTokens === "number" && Number.isFinite(message.maxTokens)) {
       await config.update(
         "maxTokens",
         Math.min(128e3, Math.max(1, Math.floor(message.maxTokens))),
-        vscode2.ConfigurationTarget.Global
+        vscode3.ConfigurationTarget.Global
       );
     }
     if (typeof message.topP === "number" && Number.isFinite(message.topP)) {
       await config.update(
         "topP",
         Math.min(1, Math.max(0.01, message.topP)),
-        vscode2.ConfigurationTarget.Global
+        vscode3.ConfigurationTarget.Global
       );
     }
     if (typeof message.openRouterFreeOnly === "boolean") {
       await config.update(
         "openRouterFreeOnly",
         message.openRouterFreeOnly,
-        vscode2.ConfigurationTarget.Global
+        vscode3.ConfigurationTarget.Global
       );
     }
     if (typeof message.terminalAccess === "boolean") {
-      await config.update("terminalAccess", message.terminalAccess, vscode2.ConfigurationTarget.Global);
+      await config.update("terminalAccess", message.terminalAccess, vscode3.ConfigurationTarget.Global);
     }
     if (typeof message.gitAccess === "boolean") {
-      await config.update("gitAccess", message.gitAccess, vscode2.ConfigurationTarget.Global);
+      await config.update("gitAccess", message.gitAccess, vscode3.ConfigurationTarget.Global);
     }
     await this.refreshModelList();
-    void vscode2.window.showInformationMessage("OllamaUnofficial: settings saved.");
+    void vscode3.window.showInformationMessage("OllamaUnofficial: settings saved.");
   }
   async renameSessionById(id) {
     const session = this.sessions.find((s) => s.id === id);
     if (!session) {
       return;
     }
-    const next = await vscode2.window.showInputBox({
+    const next = await vscode3.window.showInputBox({
       title: "Rename chat tab",
       value: session.title,
       validateInput: (value) => value.trim().length > 0 ? void 0 : "Enter a name"
@@ -1596,7 +1762,7 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
     this.postSessionState();
   }
   getSamplingConfig() {
-    const c = vscode2.workspace.getConfiguration("ollamaCoderChat");
+    const c = vscode3.workspace.getConfiguration("ollamaCoderChat");
     const temperature = Number(c.get("temperature"));
     const maxTokens = Number(c.get("maxTokens"));
     const topP = Number(c.get("topP"));
@@ -1673,7 +1839,7 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
       return;
     }
     if (message.type === "attachClipboardImage") {
-      void vscode2.window.showInformationMessage(
+      void vscode3.window.showInformationMessage(
         "Image from clipboard is not supported in this version."
       );
       return;
@@ -1721,7 +1887,7 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
       return;
     }
     if (message.type === "stub") {
-      void vscode2.window.showInformationMessage(
+      void vscode3.window.showInformationMessage(
         `${this.titleCase(message.feature)} is not available yet.`
       );
     }
@@ -1733,7 +1899,7 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
     return value.charAt(0).toUpperCase() + value.slice(1);
   }
   getProvider() {
-    const config = vscode2.workspace.getConfiguration("ollamaCoderChat");
+    const config = vscode3.workspace.getConfiguration("ollamaCoderChat");
     const raw = config.get("provider");
     if (raw === "openrouter" || raw === "huggingface") {
       return raw;
@@ -1741,7 +1907,7 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
     return "ollama";
   }
   async setProvider(provider) {
-    await vscode2.workspace.getConfiguration("ollamaCoderChat").update("provider", provider, vscode2.ConfigurationTarget.Global);
+    await vscode3.workspace.getConfiguration("ollamaCoderChat").update("provider", provider, vscode3.ConfigurationTarget.Global);
     this.postMessage({ type: "providerChanged", provider });
     await this.refreshModelList();
   }
@@ -2028,7 +2194,7 @@ ${parts.join("\n\n")}`;
     ].join("\n\n");
   }
   getApprovalMode() {
-    const config = vscode2.workspace.getConfiguration("ollamaCoderChat");
+    const config = vscode3.workspace.getConfiguration("ollamaCoderChat");
     const raw = config.get("approvalMode");
     if (raw === "auto" || raw === "chat") {
       return raw;
@@ -2081,7 +2247,7 @@ ${parts.join("\n\n")}`;
       /\/$/,
       ""
     );
-    const freeOnly = vscode2.workspace.getConfiguration("ollamaCoderChat").get("openRouterFreeOnly") ?? true;
+    const freeOnly = vscode3.workspace.getConfiguration("ollamaCoderChat").get("openRouterFreeOnly") ?? true;
     if (!key) {
       const merged = Array.from(/* @__PURE__ */ new Set([configuredModel, ...configuredExtras]));
       this.postModels(merged, configuredModel);
@@ -2147,7 +2313,7 @@ ${parts.join("\n\n")}`;
     if (!trimmed) {
       return;
     }
-    await vscode2.workspace.getConfiguration("ollamaCoderChat").update("model", trimmed, vscode2.ConfigurationTarget.Global);
+    await vscode3.workspace.getConfiguration("ollamaCoderChat").update("model", trimmed, vscode3.ConfigurationTarget.Global);
     this.postMessage({
       type: "modelChanged",
       model: trimmed
@@ -2155,7 +2321,7 @@ ${parts.join("\n\n")}`;
     await this.refreshModelList();
   }
   getConfiguredModels() {
-    const config = vscode2.workspace.getConfiguration("ollamaCoderChat");
+    const config = vscode3.workspace.getConfiguration("ollamaCoderChat");
     const raw = config.get("models");
     if (!Array.isArray(raw)) {
       return [];
@@ -2163,14 +2329,14 @@ ${parts.join("\n\n")}`;
     return raw.map((item) => String(item).trim()).filter((item) => item.length > 0);
   }
   getWorkspaceContext() {
-    const folders = vscode2.workspace.workspaceFolders ?? [];
+    const folders = vscode3.workspace.workspaceFolders ?? [];
     if (!folders.length) {
       return "";
     }
     return folders.map((folder, index) => `${index + 1}. ${folder.name}  -  ${folder.uri.fsPath}`).join("\n");
   }
   getConfig(key, fallback) {
-    const config = vscode2.workspace.getConfiguration("ollamaCoderChat");
+    const config = vscode3.workspace.getConfiguration("ollamaCoderChat");
     return config.get(key) ?? fallback;
   }
   postMessage(message) {
@@ -2189,7 +2355,7 @@ ${parts.join("\n\n")}`;
     const used = this.attachments.reduce((sum, item) => sum + item.content.length, 0);
     const remaining = _OllamaCoderChatViewProvider.maxTotalAttach - used;
     if (remaining <= 0) {
-      void vscode2.window.showWarningMessage("Attachment budget full; remove a chip or start a new chat.");
+      void vscode3.window.showWarningMessage("Attachment budget full; remove a chip or start a new chat.");
       return;
     }
     const cap = Math.min(_OllamaCoderChatViewProvider.maxAttachChars, remaining);
@@ -2205,24 +2371,24 @@ ${parts.join("\n\n")}`;
     this.postAttachments();
   }
   async readUriText(uri) {
-    const bytes = await vscode2.workspace.fs.readFile(uri);
+    const bytes = await vscode3.workspace.fs.readFile(uri);
     return new TextDecoder("utf-8").decode(bytes);
   }
   async attachActiveEditorFile() {
-    const editor = vscode2.window.activeTextEditor;
+    const editor = vscode3.window.activeTextEditor;
     if (!editor) {
-      void vscode2.window.showWarningMessage("No active editor to attach.");
+      void vscode3.window.showWarningMessage("No active editor to attach.");
       return;
     }
-    const label = vscode2.workspace.asRelativePath(editor.document.uri, false);
+    const label = vscode3.workspace.asRelativePath(editor.document.uri, false);
     const content = editor.document.getText();
     this.addAttachment(label, content);
   }
   async pickOpenEditorFile() {
     const items = [];
-    for (const group of vscode2.window.tabGroups.all) {
+    for (const group of vscode3.window.tabGroups.all) {
       for (const tab of group.tabs) {
-        if (tab.input instanceof vscode2.TabInputText) {
+        if (tab.input instanceof vscode3.TabInputText) {
           items.push({
             label: tab.label,
             description: tab.input.uri.fsPath,
@@ -2232,21 +2398,21 @@ ${parts.join("\n\n")}`;
       }
     }
     if (!items.length) {
-      void vscode2.window.showInformationMessage("No open editor tabs found.");
+      void vscode3.window.showInformationMessage("No open editor tabs found.");
       return;
     }
-    const picked = await vscode2.window.showQuickPick(items, {
+    const picked = await vscode3.window.showQuickPick(items, {
       placeHolder: "Choose a tab to attach"
     });
     if (!picked) {
       return;
     }
     const text = await this.readUriText(picked.uri);
-    const label = vscode2.workspace.asRelativePath(picked.uri, false);
+    const label = vscode3.workspace.asRelativePath(picked.uri, false);
     this.addAttachment(label, text);
   }
   async pickWorkspaceFile() {
-    const picked = await vscode2.window.showOpenDialog({
+    const picked = await vscode3.window.showOpenDialog({
       canSelectMany: false,
       openLabel: "Attach"
     });
@@ -2255,11 +2421,11 @@ ${parts.join("\n\n")}`;
     }
     const uri = picked[0];
     const text = await this.readUriText(uri);
-    const label = vscode2.workspace.asRelativePath(uri, false);
+    const label = vscode3.workspace.asRelativePath(uri, false);
     this.addAttachment(label || uri.fsPath, text);
   }
   async handlePickLocalFile() {
-    const picked = await vscode2.window.showOpenDialog({
+    const picked = await vscode3.window.showOpenDialog({
       canSelectMany: false,
       openLabel: "Attach to Chat",
       filters: {
@@ -2274,7 +2440,7 @@ ${parts.join("\n\n")}`;
     const imageExts = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "gif", "webp", "svg"]);
     const label = uri.fsPath.split(/[/\\]/).pop() ?? uri.fsPath;
     if (imageExts.has(ext)) {
-      const bytes = await vscode2.workspace.fs.readFile(uri);
+      const bytes = await vscode3.workspace.fs.readFile(uri);
       const mime = ext === "svg" ? "image/svg+xml" : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : `image/${ext}`;
       const b64 = Buffer.from(bytes).toString("base64");
       this.addAttachment(`[img] ${label}`, `[Image: ${label}]
@@ -2285,23 +2451,23 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
     }
   }
   async attachActiveProblems() {
-    const editor = vscode2.window.activeTextEditor;
+    const editor = vscode3.window.activeTextEditor;
     if (!editor) {
-      void vscode2.window.showWarningMessage("No active editor for problems.");
+      void vscode3.window.showWarningMessage("No active editor for problems.");
       return;
     }
-    const diags = vscode2.languages.getDiagnostics(editor.document.uri);
+    const diags = vscode3.languages.getDiagnostics(editor.document.uri);
     if (!diags.length) {
-      void vscode2.window.showInformationMessage("No diagnostics for the active file.");
+      void vscode3.window.showInformationMessage("No diagnostics for the active file.");
       return;
     }
     const lines = diags.map((d) => {
       const line = d.range.start.line + 1;
       const col = d.range.start.character + 1;
-      const sev = d.severity === vscode2.DiagnosticSeverity.Error ? "error" : d.severity === vscode2.DiagnosticSeverity.Warning ? "warning" : "info";
+      const sev = d.severity === vscode3.DiagnosticSeverity.Error ? "error" : d.severity === vscode3.DiagnosticSeverity.Warning ? "warning" : "info";
       return `${sev} ${line}:${col}  -  ${d.message}`;
     });
-    const label = `${vscode2.workspace.asRelativePath(editor.document.uri, false)} (problems)`;
+    const label = `${vscode3.workspace.asRelativePath(editor.document.uri, false)} (problems)`;
     this.addAttachment(label, lines.join("\n"));
   }
   // ─── Ollama health-check ────────────────────────────────────────────────────
@@ -2325,7 +2491,7 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
     const installed = await this.isOllamaInstalled();
     if (installed) {
       this.postMessage({ type: "ollamaState", state: "not-running" });
-      const choice = await vscode2.window.showWarningMessage(
+      const choice = await vscode3.window.showWarningMessage(
         "OllamaUnofficial: Ollama is installed but not running.",
         "Start Ollama",
         "Dismiss"
@@ -2333,14 +2499,14 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
       if (choice === "Start Ollama") this.startOllamaProcess();
     } else {
       this.postMessage({ type: "ollamaState", state: "not-installed" });
-      const choice = await vscode2.window.showWarningMessage(
+      const choice = await vscode3.window.showWarningMessage(
         "OllamaUnofficial: Ollama is not installed. It is required for local AI models.",
         "Download Ollama",
         "Use Cloud Instead",
         "Dismiss"
       );
       if (choice === "Download Ollama") {
-        void vscode2.env.openExternal(vscode2.Uri.parse("https://ollama.com/download"));
+        void vscode3.env.openExternal(vscode3.Uri.parse("https://ollama.com/download"));
       } else if (choice === "Use Cloud Instead") {
         await this.setProvider("openrouter");
       }
@@ -2356,7 +2522,7 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
         }
         const paths = process.platform === "win32" ? [`${process.env.LOCALAPPDATA ?? ""}\\Programs\\Ollama\\ollama.exe`] : process.platform === "darwin" ? ["/Applications/Ollama.app/Contents/MacOS/ollama", "/usr/local/bin/ollama"] : ["/usr/local/bin/ollama", "/usr/bin/ollama"];
         const checks = paths.map(
-          (p) => new Promise((res) => fs.access(p, fs.constants.F_OK, (e) => res(!e)))
+          (p) => new Promise((res) => fs2.access(p, fs2.constants.F_OK, (e) => res(!e)))
         );
         void Promise.all(checks).then((results) => resolve(results.some(Boolean)));
       });
@@ -2371,7 +2537,7 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
         if (err) (0, import_child_process.execFile)("ollama", ["serve"]);
       });
     } else {
-      const term = vscode2.window.createTerminal({ name: "Ollama Server" });
+      const term = vscode3.window.createTerminal({ name: "Ollama Server" });
       term.sendText("ollama serve");
       term.show();
     }
@@ -2390,13 +2556,13 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
       const latest = (data.tag_name ?? "").replace(/^v/, "");
       const current = currentVersion.replace(/^v/, "");
       if (latest && current && latest !== current) {
-        const choice = await vscode2.window.showInformationMessage(
+        const choice = await vscode3.window.showInformationMessage(
           `OllamaUnofficial: Ollama update available (v${current} \u2192 v${latest}).`,
           "Download Update",
           "Dismiss"
         );
         if (choice === "Download Update") {
-          void vscode2.env.openExternal(vscode2.Uri.parse("https://ollama.com/download"));
+          void vscode3.env.openExternal(vscode3.Uri.parse("https://ollama.com/download"));
         }
       }
     } catch {
@@ -2404,58 +2570,58 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
   }
   // ─── Permissions ────────────────────────────────────────────────────────────
   getFileAccess() {
-    const raw = vscode2.workspace.getConfiguration("ollamaCoderChat").get("fileAccess");
+    const raw = vscode3.workspace.getConfiguration("ollamaCoderChat").get("fileAccess");
     return raw === "read" || raw === "readwrite" ? raw : "none";
   }
   getTerminalAccess() {
-    return vscode2.workspace.getConfiguration("ollamaCoderChat").get("terminalAccess") ?? false;
+    return vscode3.workspace.getConfiguration("ollamaCoderChat").get("terminalAccess") ?? false;
   }
   getGitAccess() {
-    return vscode2.workspace.getConfiguration("ollamaCoderChat").get("gitAccess") ?? false;
+    return vscode3.workspace.getConfiguration("ollamaCoderChat").get("gitAccess") ?? false;
   }
   // File operations
   async handleOpenFile(filePath) {
     if (this.getFileAccess() === "none") {
-      void vscode2.window.showWarningMessage("OllamaUnofficial: Enable file access in the settings first.");
+      void vscode3.window.showWarningMessage("OllamaUnofficial: Enable file access in the settings first.");
       return;
     }
-    const ws = vscode2.workspace.workspaceFolders?.[0];
-    const uri = nodePath.isAbsolute(filePath) ? vscode2.Uri.file(filePath) : ws ? vscode2.Uri.joinPath(ws.uri, filePath) : void 0;
+    const ws = vscode3.workspace.workspaceFolders?.[0];
+    const uri = nodePath2.isAbsolute(filePath) ? vscode3.Uri.file(filePath) : ws ? vscode3.Uri.joinPath(ws.uri, filePath) : void 0;
     if (!uri) {
-      void vscode2.window.showWarningMessage(`Cannot resolve: ${filePath}`);
+      void vscode3.window.showWarningMessage(`Cannot resolve: ${filePath}`);
       return;
     }
     try {
-      const doc = await vscode2.workspace.openTextDocument(uri);
-      await vscode2.window.showTextDocument(doc, { preview: false });
+      const doc = await vscode3.workspace.openTextDocument(uri);
+      await vscode3.window.showTextDocument(doc, { preview: false });
     } catch {
-      void vscode2.window.showWarningMessage(`OllamaUnofficial: File not found: ${filePath}`);
+      void vscode3.window.showWarningMessage(`OllamaUnofficial: File not found: ${filePath}`);
     }
   }
   async handleApplyFileEdit(code, _language, suggestedPath) {
     if (this.getFileAccess() !== "readwrite") {
-      void vscode2.window.showWarningMessage(
+      void vscode3.window.showWarningMessage(
         'OllamaUnofficial: Enable "Read & Write" file access in the \u2699 settings panel first.'
       );
       return;
     }
     let targetUri;
     if (suggestedPath) {
-      const ws = vscode2.workspace.workspaceFolders?.[0];
-      if (ws) targetUri = vscode2.Uri.joinPath(ws.uri, suggestedPath);
+      const ws = vscode3.workspace.workspaceFolders?.[0];
+      if (ws) targetUri = vscode3.Uri.joinPath(ws.uri, suggestedPath);
     }
     if (!targetUri) {
-      const picked = await vscode2.window.showSaveDialog({
-        defaultUri: vscode2.workspace.workspaceFolders?.[0]?.uri,
+      const picked = await vscode3.window.showSaveDialog({
+        defaultUri: vscode3.workspace.workspaceFolders?.[0]?.uri,
         saveLabel: "Apply to this file"
       });
       if (!picked) return;
       targetUri = picked;
     }
     try {
-      await vscode2.workspace.fs.readFile(targetUri);
-      const rel2 = vscode2.workspace.asRelativePath(targetUri);
-      const choice = await vscode2.window.showInformationMessage(
+      await vscode3.workspace.fs.readFile(targetUri);
+      const rel2 = vscode3.workspace.asRelativePath(targetUri);
+      const choice = await vscode3.window.showInformationMessage(
         `Apply AI-proposed changes to ${rel2}? This will overwrite its current contents.`,
         "Apply",
         "Cancel"
@@ -2463,14 +2629,14 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
       if (choice !== "Apply") return;
     } catch {
     }
-    const rel = vscode2.workspace.asRelativePath(targetUri);
+    const rel = vscode3.workspace.asRelativePath(targetUri);
     this.progressProvider?.setSteps([
       { label: "Writing file", status: "active", detail: rel }
     ]);
-    await vscode2.workspace.fs.writeFile(targetUri, new TextEncoder().encode(code));
-    const doc = await vscode2.workspace.openTextDocument(targetUri);
-    await vscode2.window.showTextDocument(doc, { preview: false });
-    void vscode2.window.showInformationMessage(
+    await vscode3.workspace.fs.writeFile(targetUri, new TextEncoder().encode(code));
+    const doc = await vscode3.workspace.openTextDocument(targetUri);
+    await vscode3.window.showTextDocument(doc, { preview: false });
+    void vscode3.window.showInformationMessage(
       `OllamaUnofficial: Applied \u2192 ${rel}`
     );
     this.progressProvider?.allDone();
@@ -2479,7 +2645,7 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
     }, 2500);
   }
   async handleGetWorkspaceTree() {
-    const folders = vscode2.workspace.workspaceFolders;
+    const folders = vscode3.workspace.workspaceFolders;
     if (!folders?.length) {
       this.postMessage({ type: "workspaceTree", tree: "No workspace folder open." });
       return;
@@ -2499,13 +2665,13 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
     const IGNORE = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", "out", ".next", "__pycache__", ".vscode", "coverage", ".cache"]);
     let entries;
     try {
-      entries = await vscode2.workspace.fs.readDirectory(uri);
+      entries = await vscode3.workspace.fs.readDirectory(uri);
     } catch {
       return;
     }
     entries.sort(([an, at], [bn, bt]) => {
-      const ad = at === vscode2.FileType.Directory ? 0 : 1;
-      const bd = bt === vscode2.FileType.Directory ? 0 : 1;
+      const ad = at === vscode3.FileType.Directory ? 0 : 1;
+      const bd = bt === vscode3.FileType.Directory ? 0 : 1;
       return ad !== bd ? ad - bd : an.localeCompare(bn);
     });
     const visible = entries.filter(([n]) => !IGNORE.has(n) && !n.startsWith("."));
@@ -2514,9 +2680,9 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
       const isLast = i === visible.length - 1;
       const branch = isLast ? "L-- " : "+-- ";
       const childPfx = isLast ? "    " : "|   ";
-      if (type === vscode2.FileType.Directory) {
+      if (type === vscode3.FileType.Directory) {
         lines.push(`${prefix}${branch}${name}/`);
-        await this.appendDirTree(vscode2.Uri.joinPath(uri, name), prefix + childPfx, lines, depth + 1, maxDepth);
+        await this.appendDirTree(vscode3.Uri.joinPath(uri, name), prefix + childPfx, lines, depth + 1, maxDepth);
       } else {
         lines.push(`${prefix}${branch}${name}`);
       }
@@ -2525,11 +2691,11 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
   // Terminal operations
   handleRunInTerminal(command) {
     if (!this.getTerminalAccess()) {
-      void vscode2.window.showWarningMessage("OllamaUnofficial: Enable terminal access in the settings first.");
+      void vscode3.window.showWarningMessage("OllamaUnofficial: Enable terminal access in the settings first.");
       return;
     }
     if (!this.ollamaTerminal || this.ollamaTerminal.exitStatus !== void 0) {
-      this.ollamaTerminal = vscode2.window.createTerminal({ name: "OllamaUnofficial" });
+      this.ollamaTerminal = vscode3.window.createTerminal({ name: "OllamaUnofficial" });
     }
     this.progressProvider?.setSteps([
       { label: "Running in terminal", status: "active", detail: command.slice(0, 60) }
@@ -2543,12 +2709,12 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
   // Git operations
   async handleGitStatus() {
     if (!this.getGitAccess()) {
-      void vscode2.window.showWarningMessage("OllamaUnofficial: Enable git access in the settings first.");
+      void vscode3.window.showWarningMessage("OllamaUnofficial: Enable git access in the settings first.");
       return;
     }
     this.progressProvider?.setSteps([{ label: "Getting git status", status: "active" }]);
     try {
-      const gitExt = vscode2.extensions.getExtension("vscode.git");
+      const gitExt = vscode3.extensions.getExtension("vscode.git");
       if (!gitExt) {
         this.postMessage({ type: "gitResult", op: "status", output: "Git extension not available." });
         return;
@@ -2566,7 +2732,7 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
         return;
       }
       const statusMap = { 0: " M", 1: " A", 2: " D", 5: "MM", 6: "??" };
-      const lines = changes.map((c) => `${statusMap[c.status] ?? " M"}  ${vscode2.workspace.asRelativePath(c.uri)}`);
+      const lines = changes.map((c) => `${statusMap[c.status] ?? " M"}  ${vscode3.workspace.asRelativePath(c.uri)}`);
       this.postMessage({ type: "gitResult", op: "status", output: `Changes:
 ${lines.join("\n")}` });
       this.progressProvider?.allDone();
@@ -2583,25 +2749,25 @@ ${lines.join("\n")}` });
   }
   async handleGitDiff(filePath) {
     if (!this.getGitAccess()) {
-      void vscode2.window.showWarningMessage("OllamaUnofficial: Enable git access in the settings first.");
+      void vscode3.window.showWarningMessage("OllamaUnofficial: Enable git access in the settings first.");
       return;
     }
     if (filePath) {
-      const ws = vscode2.workspace.workspaceFolders?.[0];
+      const ws = vscode3.workspace.workspaceFolders?.[0];
       if (ws) {
-        const uri = vscode2.Uri.joinPath(ws.uri, filePath);
-        await vscode2.commands.executeCommand("git.openChange", uri);
+        const uri = vscode3.Uri.joinPath(ws.uri, filePath);
+        await vscode3.commands.executeCommand("git.openChange", uri);
       }
     } else {
-      await vscode2.commands.executeCommand("workbench.view.scm");
+      await vscode3.commands.executeCommand("workbench.view.scm");
     }
   }
   async handleGitCommit(commitMessage) {
     if (!this.getGitAccess()) {
-      void vscode2.window.showWarningMessage("OllamaUnofficial: Enable git access in the settings first.");
+      void vscode3.window.showWarningMessage("OllamaUnofficial: Enable git access in the settings first.");
       return;
     }
-    const choice = await vscode2.window.showInformationMessage(
+    const choice = await vscode3.window.showInformationMessage(
       `Commit with message: '${commitMessage}'?`,
       "Commit",
       "Cancel"
@@ -2612,17 +2778,17 @@ ${lines.join("\n")}` });
       { label: "Committing", status: "active", detail: commitMessage.slice(0, 60) }
     ]);
     try {
-      const gitExt = vscode2.extensions.getExtension("vscode.git");
+      const gitExt = vscode3.extensions.getExtension("vscode.git");
       if (!gitExt) return;
       if (!gitExt.isActive) await gitExt.activate();
       const api = gitExt.exports.getAPI(1);
       const repo = api.repositories[0];
       if (!repo) {
-        void vscode2.window.showWarningMessage("No git repository found.");
+        void vscode3.window.showWarningMessage("No git repository found.");
         return;
       }
       await repo.commit(commitMessage, { all: false });
-      void vscode2.window.showInformationMessage(`Committed: '${commitMessage}'`);
+      void vscode3.window.showInformationMessage(`Committed: '${commitMessage}'`);
       this.postMessage({ type: "gitResult", op: "commit", output: `Committed: '${commitMessage}'` });
       this.progressProvider?.allDone();
       setTimeout(() => {
@@ -2633,15 +2799,15 @@ ${lines.join("\n")}` });
       setTimeout(() => {
         this.progressProvider?.clear();
       }, 3e3);
-      void vscode2.window.showErrorMessage(`Commit failed: ${err instanceof Error ? err.message : String(err)}`);
+      void vscode3.window.showErrorMessage(`Commit failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   async handleGitPush() {
     if (!this.getGitAccess()) {
-      void vscode2.window.showWarningMessage("OllamaUnofficial: Enable git access in the settings first.");
+      void vscode3.window.showWarningMessage("OllamaUnofficial: Enable git access in the settings first.");
       return;
     }
-    const choice = await vscode2.window.showWarningMessage("Push current branch to remote?", { modal: true }, "Push", "Cancel");
+    const choice = await vscode3.window.showWarningMessage("Push current branch to remote?", { modal: true }, "Push", "Cancel");
     if (choice !== "Push") return;
     this.progressProvider?.setSteps([
       { label: "Connecting to remote", status: "active" },
@@ -2649,7 +2815,7 @@ ${lines.join("\n")}` });
     ]);
     try {
       this.progressProvider?.activateStep(1);
-      await vscode2.commands.executeCommand("git.push");
+      await vscode3.commands.executeCommand("git.push");
       this.postMessage({ type: "gitResult", op: "push", output: "Pushed to remote successfully." });
       this.progressProvider?.allDone();
       setTimeout(() => {
@@ -2660,19 +2826,19 @@ ${lines.join("\n")}` });
       setTimeout(() => {
         this.progressProvider?.clear();
       }, 3e3);
-      void vscode2.window.showErrorMessage(`Push failed: ${err instanceof Error ? err.message : String(err)}`);
+      void vscode3.window.showErrorMessage(`Push failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   getHtml(webview) {
     const nonce = getNonce();
     const scriptUri = webview.asWebviewUri(
-      vscode2.Uri.joinPath(this.context.extensionUri, "dist", "chat.js")
+      vscode3.Uri.joinPath(this.context.extensionUri, "dist", "chat.js")
     );
     const styleUri = webview.asWebviewUri(
-      vscode2.Uri.joinPath(this.context.extensionUri, "media", "chat.css")
+      vscode3.Uri.joinPath(this.context.extensionUri, "media", "chat.css")
     );
     const iconUri = webview.asWebviewUri(
-      vscode2.Uri.joinPath(this.context.extensionUri, "media", "icon.svg")
+      vscode3.Uri.joinPath(this.context.extensionUri, "media", "icon.svg")
     );
     const model = this.getConfig("model", "llama3.2");
     const provider = this.getProvider();
@@ -2864,7 +3030,7 @@ ${lines.join("\n")}` });
   }
 };
 async function promptForSecret(context, secretKey, title, placeholder) {
-  const value = await vscode2.window.showInputBox({
+  const value = await vscode3.window.showInputBox({
     title,
     prompt: "Stored securely in VS Code Secret Storage (not in settings.json).",
     password: true,
@@ -2875,30 +3041,30 @@ async function promptForSecret(context, secretKey, title, placeholder) {
     return;
   }
   await context.secrets.store(secretKey, value.trim());
-  void vscode2.window.showInformationMessage(`${title}: saved.`);
+  void vscode3.window.showInformationMessage(`${title}: saved.`);
 }
 function activate(context) {
   const provider = new OllamaCoderChatViewProvider(context);
   const progressProvider = new ProgressViewProvider();
   provider.setProgressProvider(progressProvider);
   context.subscriptions.push(
-    vscode2.window.registerWebviewViewProvider(OllamaCoderChatViewProvider.viewType, provider)
+    vscode3.window.registerWebviewViewProvider(OllamaCoderChatViewProvider.viewType, provider)
   );
   context.subscriptions.push(
-    vscode2.window.registerWebviewViewProvider(ProgressViewProvider.viewType, progressProvider)
+    vscode3.window.registerWebviewViewProvider(ProgressViewProvider.viewType, progressProvider)
   );
   context.subscriptions.push(
-    vscode2.commands.registerCommand("ollamaCoderChat.focus", async () => {
-      await vscode2.commands.executeCommand("ollamaCoderChat.sidebar.focus");
+    vscode3.commands.registerCommand("ollamaCoderChat.focus", async () => {
+      await vscode3.commands.executeCommand("ollamaCoderChat.sidebar.focus");
     })
   );
   context.subscriptions.push(
-    vscode2.commands.registerCommand("ollamaCoderChat.newChat", () => {
+    vscode3.commands.registerCommand("ollamaCoderChat.newChat", () => {
       provider.createNewSession();
     })
   );
   context.subscriptions.push(
-    vscode2.commands.registerCommand(
+    vscode3.commands.registerCommand(
       "ollamaCoderChat.setOpenRouterApiKey",
       () => promptForSecret(
         context,
@@ -2909,7 +3075,7 @@ function activate(context) {
     )
   );
   context.subscriptions.push(
-    vscode2.commands.registerCommand(
+    vscode3.commands.registerCommand(
       "ollamaCoderChat.setHuggingFaceApiToken",
       () => promptForSecret(
         context,
@@ -2920,17 +3086,18 @@ function activate(context) {
     )
   );
   context.subscriptions.push(
-    vscode2.commands.registerCommand("ollamaCoderChat.showLog", () => {
+    vscode3.commands.registerCommand("ollamaCoderChat.showLog", () => {
       provider.showLog();
     })
   );
   context.subscriptions.push(
-    vscode2.commands.registerCommand("ollamaCoderChat.openBrowser", () => {
+    vscode3.commands.registerCommand("ollamaCoderChat.openBrowser", () => {
       BrowserPanel.createOrShow(context, (msg) => {
         provider.postMessagePublic(msg);
       });
     })
   );
+  checkForUpdates(context, provider.getLog());
 }
 function deactivate() {
 }

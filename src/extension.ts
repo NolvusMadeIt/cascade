@@ -15,6 +15,7 @@ import { openAiNonStream, streamOpenAiCompatibleChat } from './llm/openaiSseStre
 import { SECRET_HUGGINGFACE, SECRET_OPENROUTER } from './secrets';
 import { BrowserPanel } from './browserPanel';
 import { ProgressViewProvider } from './progressPanel';
+import { checkForUpdates } from './updater';
 
 type ChatMessage = PersistedMessage;
 
@@ -107,6 +108,10 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
 
   public setProgressProvider(p: ProgressViewProvider): void {
     this.progressProvider = p;
+  }
+
+  public getLog(): vscode.OutputChannel {
+    return this.log;
   }
 
   constructor(private readonly context: vscode.ExtensionContext) {
@@ -1927,6 +1932,9 @@ export function activate(context: vscode.ExtensionContext): void {
       });
     })
   );
+
+  // Check for updates 8 seconds after startup (runs silently in background)
+  checkForUpdates(context, provider.getLog());
 }
 
 export function deactivate(): void {}
