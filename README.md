@@ -1,223 +1,141 @@
+<div align="center">
+
+<img src="media/icon.svg" width="80" height="80" alt="OllamaUnofficial Logo" />
+
 # OllamaUnofficial
 
-A free, open-source AI coding assistant sidebar for Visual Studio Code. Run models locally with Ollama, or connect to OpenRouter and Hugging Face — no subscriptions, no telemetry, no lock-in.
+### The free AI coding assistant that doesn't ask for your credit card.
+
+Run powerful AI models locally with Ollama, or tap into hundreds of free models from OpenRouter and Hugging Face — all from a sleek sidebar right inside VS Code.
+
+<br/>
+
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/gV7FzbrJCu)
+[![Releases](https://img.shields.io/github/v/release/Spiritbocs/OllamaUnofficial?style=for-the-badge&logo=github&label=Latest%20Release&color=238636)](https://github.com/Spiritbocs/OllamaUnofficial/releases)
+[![Issues](https://img.shields.io/github/issues/Spiritbocs/OllamaUnofficial?style=for-the-badge&logo=github&label=Issues&color=da3633)](https://github.com/Spiritbocs/OllamaUnofficial/issues)
+[![License](https://img.shields.io/github/license/Spiritbocs/OllamaUnofficial?style=for-the-badge&color=0075ca)](LICENSE)
+
+</div>
 
 ---
 
-## Capabilities
+## Why OllamaUnofficial?
 
-| Feature | Description |
+Every major AI coding assistant wants a subscription. OllamaUnofficial doesn't. It connects VS Code to:
+
+- **Ollama** — run models like Llama 3, Mistral, DeepSeek-R1, and Phi-4 entirely on your own machine. No internet required. No data leaving your PC.
+- **OpenRouter** — access 200+ models including top-tier options on a generous free tier, zero setup beyond an API key.
+- **Hugging Face** — tap the world's largest open model hub with thousands of models available through the Inference API, many completely free.
+
+Switch between providers in one click. The best AI coding experience, at zero cost.
+
+---
+
+## Features
+
+| Capability | Details |
 |---|---|
-| **File System Access** | Read and write files directly in your workspace |
-| **Multi-file Context** | Understands your entire project structure |
-| **Inline Editing** | Apply AI-suggested code to files with one click |
-| **Code Generation** | Generate, refactor, and fix code in any language |
-| **Terminal Access** | Run proposed commands in the integrated terminal |
-| **Git Integration** | View status, diffs, commit, and push — all from chat |
-| **Chat Context** | Remembers your conversation across sessions and files |
-| **File Navigation** | Jump to any file in your workspace instantly |
-
----
-
-## What Can It Do?
-
-- **Ask about any file** — attach it with the + Context button or ask by name
-- **Request changes** — "Add error handling to src/api.ts" → click Apply
-- **See changes before applying** — confirm before anything is written to disk
-- **Run code** — shell code blocks get a ▶ Run button for the integrated terminal
-- **Git workflow** — ask for a git status, review a diff, or commit staged changes
-- **Refactor** — improve code quality, rename things, restructure modules
-- **Debug** — attach your Problems panel and ask the AI to fix the errors
-
----
-
-## Providers
-
-| Provider | Details |
-|---|---|
-| **Ollama (local)** | Fully private, no internet needed, no API key. Runs on your own GPU/CPU. |
-| **OpenRouter** | Hundreds of cloud models, many completely free ($0/token). |
-| **Hugging Face** | HF Inference Providers via your own HF token. |
-
-Switch providers any time from the dropdown in the header.
-
----
-
-## Chat Modes
-
-- **Agent** — step-by-step coding tasks, asks questions when blocked
-- **Ask** — direct answers, minimal preamble
-- **Plan** — numbered plan first, then details and code
-
----
-
-## Requirements
-
-### Ollama (local models)
-
-Install [Ollama](https://ollama.com) and pull a model:
-
-```bash
-ollama pull llama3.2
-```
-
-The extension connects to `http://127.0.0.1:11434` by default. On first launch it will:
-- Check if Ollama is running
-- Notify you if it's installed but not started (and offer to start it)
-- Offer to download it if it's not installed yet
-- Check GitHub for updates and notify you if a newer version is available
-
-### OpenRouter
-
-1. Sign up at [openrouter.ai](https://openrouter.ai)
-2. Create a key at [openrouter.ai/keys](https://openrouter.ai/keys)
-3. Enter it in the ⚙ settings panel
-
-### Hugging Face
-
-1. Create an account at [huggingface.co](https://huggingface.co)
-2. Generate a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) with **Inference Providers** permission
-3. Enter it in the ⚙ settings panel
-
----
-
-## Installation
-
-### From the .vsix file
-
-1. Download `ollamaunofficial-0.1.0.vsix` from the `release/` folder
-2. Open VS Code
-3. Press `Ctrl+Shift+P` → **Install from VSIX**
-4. Select the file → **Reload Now**
-
-The OllamaUnofficial icon will appear in your Activity Bar.
-
-### From source
-
-See [CONTRIB.md](./CONTRIB.md) for full build instructions.
+| 💬 **Smart Chat** | Markdown rendering, code blocks with copy/apply/run actions, multi-session tabs |
+| 🧠 **Reasoning Models** | DeepSeek-R1 thinking blocks hidden by default, expandable with one click |
+| 📁 **File Context** | Attach active files, open editors, workspace files, or upload any file from disk |
+| ✏️ **Inline Editing** | Apply AI-suggested code directly to files in your workspace |
+| 🖥️ **Terminal Access** | Run shell commands generated by the AI in the integrated terminal |
+| 🌿 **Git Integration** | Git status, diffs, commits, and pushes — all from the chat |
+| 🌐 **Agent Browser** | Browse any webpage inside VS Code, select text or click elements, send to chat |
+| 🔍 **File Navigation** | Explore your workspace tree and open files directly from chat |
 
 ---
 
 ## Getting Started
 
-1. Click the OllamaUnofficial icon in the Activity Bar.
-2. Choose your provider from the header dropdown.
-3. Click **⚙** to open settings and configure keys and permissions.
-4. Type a message and press **Enter**.
+### 1 — Install the extension
 
-To unlock file editing, terminal execution, and git operations, open **⚙ Settings** and enable them in the **Workspace & Terminal Access** section.
+Download the latest `.vsix` from the [Releases page](https://github.com/Spiritbocs/OllamaUnofficial/releases), then:
 
----
+```
+VS Code → Ctrl+Shift+P → "Extensions: Install from VSIX…" → pick the file → Reload
+```
 
-## Permissions (⚙ Settings Panel)
+### 2 — Pick your provider
 
-These are all off by default and opt-in:
+Open the OllamaUnofficial sidebar, click the ⚙ settings icon, and choose a provider:
 
-| Permission | What it unlocks |
-|---|---|
-| **File Access: Read** | AI can see workspace file structure; you can attach files by name |
-| **File Access: Read & Write** | AI code blocks get an **Apply to File** button; one click writes the file |
-| **Terminal Access** | Shell code blocks get a **▶ Run** button that sends the command to the integrated terminal |
-| **Git Access** | Ask for git status, open diffs, commit staged changes, push to remote |
+#### Ollama (local, 100% free, private)
+1. [Download and install Ollama](https://ollama.com/download)
+2. Pull a model: `ollama pull llama3.2` (or any model from [ollama.com/library](https://ollama.com/library))
+3. OllamaUnofficial will auto-detect Ollama on startup
 
----
+#### OpenRouter (free tier, cloud)
+1. Create a free account at [openrouter.ai](https://openrouter.ai)
+2. Generate an API key at [openrouter.ai/keys](https://openrouter.ai/keys)
+3. Paste it into Settings → OpenRouter API Key
 
-## Code Block Actions
-
-When the AI responds with code, action buttons appear on hover:
-
-- **Copy** — copies the raw code to clipboard
-- **Apply to File** — writes the code to a file you choose (requires Read & Write access). If the first line of the code block is a comment like `// File: src/utils.ts`, the path is pre-filled.
-- **▶ Run** — sends shell/bash/zsh commands straight to the integrated terminal (requires Terminal Access)
+#### Hugging Face (free tier, cloud)
+1. Create a free account at [huggingface.co](https://huggingface.co)
+2. Generate a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) (Inference Providers permission)
+3. Paste it into Settings → Hugging Face Token
 
 ---
 
-## Context Attachments
+## Recommended Free Models
 
-Click **+ Context** to attach context before sending a message:
-
-- Active file in the editor
-- Any open editor tab
-- Any file from disk (file picker)
-- Current lint/compiler problems
-- Image from clipboard
-
----
-
-## Multiple Sessions
-
-Use **+** in the header to open new chat tabs. Each tab has its own history. Click **✎** on a tab to rename it.
-
----
-
-## VS Code Settings
-
-| Setting | Default | Description |
+| Provider | Model | Good For |
 |---|---|---|
-| `ollamaCoderChat.baseUrl` | `http://127.0.0.1:11434` | Ollama server URL |
-| `ollamaCoderChat.provider` | `ollama` | Active provider |
-| `ollamaCoderChat.model` | `llama3.2` | Default model ID |
-| `ollamaCoderChat.openRouterFreeOnly` | `true` | Only list free ($0) models from OpenRouter |
-| `ollamaCoderChat.temperature` | `0.2` | Sampling temperature (0–2) |
-| `ollamaCoderChat.maxTokens` | `4096` | Max tokens to generate |
-| `ollamaCoderChat.topP` | `1` | Nucleus sampling top-p |
-| `ollamaCoderChat.fileAccess` | `none` | `none` / `read` / `readwrite` |
-| `ollamaCoderChat.terminalAccess` | `false` | Allow terminal command execution |
-| `ollamaCoderChat.gitAccess` | `false` | Allow git operations |
-| `ollamaCoderChat.approvalMode` | `ask` | How code edits are handled |
-| `ollamaCoderChat.models` | `[]` | Extra model IDs to always show |
+| Ollama | `llama3.2:3b` | Fast local chat |
+| Ollama | `deepseek-r1:7b` | Reasoning & planning |
+| Ollama | `qwen2.5-coder:7b` | Code generation |
+| OpenRouter | `google/gemini-2.0-flash-exp:free` | Fast, capable, free |
+| OpenRouter | `meta-llama/llama-3.3-70b-instruct:free` | High quality, free |
+| OpenRouter | `deepseek/deepseek-r1:free` | Best free reasoning |
+| Hugging Face | `Qwen/Qwen2.5-Coder-7B-Instruct` | Code & chat |
+| Hugging Face | `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | Reasoning |
 
 ---
 
-## Commands
+## Workspace Permissions
 
-| Command | What it does |
+Control what the AI can access in Settings:
+
+| Setting | Options | What it does |
+|---|---|---|
+| **File Access** | Off / Read / Read+Write | Let the AI read or edit your workspace files |
+| **Terminal Access** | On / Off | Let the AI run commands in the integrated terminal |
+| **Git Access** | On / Off | Let the AI view diffs, commit, and push |
+
+---
+
+## Community & Support
+
+Have a question, found a bug, or want to request a feature?
+
+| | |
 |---|---|
-| `OllamaUnofficial: Focus Chat` | Open and focus the chat sidebar |
-| `OllamaUnofficial: New Chat Tab` | Start a new session |
-| `OllamaUnofficial: Set OpenRouter API Key` | Securely store your OpenRouter key |
-| `OllamaUnofficial: Set Hugging Face API Token` | Securely store your HF token |
-| `OllamaUnofficial: Show Log` | Open the output panel for debugging |
+| 💬 **Chat with us** | [Join the Discord](https://discord.gg/gV7FzbrJCu) — get help, share ideas, show off what you've built |
+| 🐛 **Report a bug** | [Open an Issue](https://github.com/Spiritbocs/OllamaUnofficial/issues) — include your provider, model, and what happened |
+| 💡 **Request a feature** | [Open an Issue](https://github.com/Spiritbocs/OllamaUnofficial/issues) with the `enhancement` label |
+| 🤝 **Contribute** | See [CONTRIB.md](CONTRIB.md) for the developer guide |
 
 ---
 
-## Keyboard Shortcuts
+## Contributing
 
-| Key | Action |
-|---|---|
-| `Enter` | Send message |
-| `Shift+Enter` | New line in the message box |
+Contributions are welcome! Check out [CONTRIB.md](CONTRIB.md) for project structure, build instructions, and the full message protocol reference.
 
----
+```bash
+git clone https://github.com/Spiritbocs/OllamaUnofficial.git
+cd OllamaUnofficial
+npm install
+node esbuild.mjs   # build
+```
 
-## Privacy
-
-- Ollama: **nothing leaves your machine**
-- OpenRouter / Hugging Face: messages are sent to those services under their own privacy policies
-- API keys are stored in VS Code's encrypted Secret Storage — never in `settings.json`
+Press `F5` in VS Code to launch the Extension Development Host.
 
 ---
 
-## Changelog
+<div align="center">
 
-### 0.1.0
-- File System Access: read and write workspace files, Apply-to-File button on all code blocks
-- Terminal Access: ▶ Run button on shell code blocks, integrated terminal execution
-- Git Integration: status, diff view, commit, and push from chat
-- File Navigation: open any workspace file mentioned in chat
-- Workspace tree: the AI can see your full project structure
-- Ollama health check: detects if Ollama is missing or outdated and guides you through setup
-- Capabilities grid in the empty state showing what's enabled
-- Settings panel: new Workspace & Terminal Access section
-- Improved code block action toolbar (Copy / Apply / Run)
+Made with ☕ for developers who believe great tools should be free.
 
-### 0.0.1
-- Initial release: Ollama, OpenRouter, Hugging Face providers
-- Multi-session tabs, context attachments, Agent/Ask/Plan modes
-- Secure API key storage, improved settings panel
+<sub>OllamaUnofficial is an independent project and is not affiliated with Ollama, OpenRouter, or Hugging Face.</sub>
 
----
-
-## License
-
-MIT — see `LICENSE` for details.
+</div>
