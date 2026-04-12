@@ -1,6 +1,5 @@
 <div align="center">
 
-<img src="media/icon.svg" width="80" height="80" alt="OllamaUnofficial Logo" />
 
 # OllamaUnofficial
 

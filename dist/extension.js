@@ -1006,6 +1006,337 @@ body {
   }
 };
 
+// src/progressPanel.ts
+var ProgressViewProvider = class _ProgressViewProvider {
+  static viewType = "ollamaCoderChat.progress";
+  view;
+  steps = [];
+  idleLabel = "Ready";
+  resolveWebviewView(webviewView, _context, _token) {
+    this.view = webviewView;
+    webviewView.webview.options = { enableScripts: true };
+    webviewView.webview.html = _ProgressViewProvider.getHtml();
+    webviewView.webview.onDidReceiveMessage((msg) => {
+      if (msg.type === "ready") {
+        this.flush();
+      }
+    });
+  }
+  /** Replace all steps at once */
+  setSteps(steps) {
+    this.steps = steps;
+    this.flush();
+  }
+  /** Mark a single step by index as active (sets all previous to done) */
+  activateStep(index, detail) {
+    this.steps = this.steps.map((s, i) => ({
+      ...s,
+      status: i < index ? "done" : i === index ? "active" : "pending",
+      detail: i === index ? detail ?? s.detail : s.detail
+    }));
+    this.flush();
+  }
+  /** Mark a single step done */
+  completeStep(index) {
+    if (this.steps[index]) {
+      this.steps[index] = { ...this.steps[index], status: "done" };
+      this.flush();
+    }
+  }
+  /** Mark a step errored */
+  errorStep(index, detail) {
+    if (this.steps[index]) {
+      this.steps[index] = { ...this.steps[index], status: "error", detail };
+      this.flush();
+    }
+  }
+  /** Mark all steps done */
+  allDone() {
+    this.steps = this.steps.map((s) => ({ ...s, status: "done" }));
+    this.flush();
+  }
+  /** Clear back to idle */
+  clear() {
+    this.steps = [];
+    this.flush();
+  }
+  flush() {
+    if (this.view?.visible) {
+      void this.view.webview.postMessage({
+        type: "update",
+        steps: this.steps,
+        idle: this.idleLabel
+      });
+    }
+  }
+  static getHtml() {
+    return (
+      /* html */
+      `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--vscode-font-family, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif);
+  font-size: 12px;
+  background: transparent;
+  color: var(--vscode-foreground, #cccccc);
+  padding: 10px 12px 14px;
+  min-height: 100%;
+}
+
+#idle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.idle-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vscode-descriptionForeground, #666);
+  opacity: 0.5;
+}
+
+#steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 0;
+  position: relative;
+  transition: opacity 0.2s;
+}
+
+/* Connector line between steps */
+.step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 11px;
+  top: 26px;
+  bottom: -7px;
+  width: 1px;
+  background: var(--vscode-widget-border, rgba(127,127,127,0.25));
+}
+
+.step.status-done:not(:last-child)::after {
+  background: color-mix(in srgb, var(--vscode-testing-iconPassed, #4caf50) 50%, transparent);
+}
+
+/* Number / status indicator */
+.step-indicator {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  margin-top: 1px;
+  position: relative;
+  z-index: 1;
+}
+
+.status-pending .step-indicator {
+  border: 1.5px solid var(--vscode-widget-border, rgba(127,127,127,0.4));
+  color: var(--vscode-descriptionForeground, #888);
+  background: var(--vscode-sideBar-background, #1e1e1e);
+}
+
+.status-active .step-indicator {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  border: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vscode-button-background, #0e639c) 25%, transparent);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.status-done .step-indicator {
+  background: color-mix(in srgb, var(--vscode-testing-iconPassed, #4caf50) 18%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--vscode-testing-iconPassed, #4caf50) 60%, transparent);
+  color: var(--vscode-testing-iconPassed, #4caf50);
+}
+
+.status-error .step-indicator {
+  background: color-mix(in srgb, var(--vscode-errorForeground, #f85149) 15%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--vscode-errorForeground, #f85149) 50%, transparent);
+  color: var(--vscode-errorForeground, #f85149);
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--vscode-button-background, #0e639c) 25%, transparent); }
+  50%       { box-shadow: 0 0 0 5px color-mix(in srgb, var(--vscode-button-background, #0e639c) 10%, transparent); }
+}
+
+.step-body {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.step-label {
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.status-pending .step-label {
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.status-active .step-label {
+  color: var(--vscode-foreground, #ccc);
+  font-weight: 600;
+}
+
+.status-done .step-label {
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.status-error .step-label {
+  color: var(--vscode-errorForeground, #f85149);
+}
+
+.step-detail {
+  font-size: 10.5px;
+  color: var(--vscode-descriptionForeground, #777);
+  margin-top: 2px;
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Animated dots for active step */
+.active-dots {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.active-dots span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--vscode-button-background, #0e639c);
+  animation: bounce 1.2s ease-in-out infinite;
+  display: inline-block;
+}
+
+.active-dots span:nth-child(2) { animation-delay: 0.2s; }
+.active-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  40%            { transform: translateY(-3px); opacity: 1; }
+}
+
+.step-enter {
+  animation: stepIn 0.2s ease-out both;
+}
+
+@keyframes stepIn {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+</style>
+</head>
+<body>
+<div id="idle"><div class="idle-dot"></div><span>Ready</span></div>
+<div id="steps" style="display:none"></div>
+
+<script>
+(function () {
+  const vscode = acquireVsCodeApi();
+  const idleEl = document.getElementById('idle');
+  const stepsEl = document.getElementById('steps');
+
+  const ICONS = { done: '\u2713', error: '\u2715' };
+
+  function render(steps, idleLabel) {
+    if (!steps || !steps.length) {
+      idleEl.style.display = 'flex';
+      idleEl.querySelector('span').textContent = idleLabel || 'Ready';
+      stepsEl.style.display = 'none';
+      stepsEl.innerHTML = '';
+      return;
+    }
+    idleEl.style.display = 'none';
+    stepsEl.style.display = 'flex';
+
+    const prevCount = stepsEl.children.length;
+    stepsEl.innerHTML = '';
+
+    steps.forEach((step, i) => {
+      const div = document.createElement('div');
+      div.className = 'step status-' + step.status + (i >= prevCount ? ' step-enter' : '');
+
+      const indicator = document.createElement('div');
+      indicator.className = 'step-indicator';
+      if (step.status === 'done') indicator.textContent = ICONS.done;
+      else if (step.status === 'error') indicator.textContent = ICONS.error;
+      else indicator.textContent = String(i + 1);
+
+      const body = document.createElement('div');
+      body.className = 'step-body';
+
+      const label = document.createElement('div');
+      label.className = 'step-label';
+      label.textContent = step.label;
+
+      if (step.status === 'active') {
+        const dots = document.createElement('span');
+        dots.className = 'active-dots';
+        dots.innerHTML = '<span></span><span></span><span></span>';
+        label.appendChild(dots);
+      }
+
+      body.appendChild(label);
+
+      if (step.detail) {
+        const detail = document.createElement('div');
+        detail.className = 'step-detail';
+        detail.textContent = step.detail;
+        body.appendChild(detail);
+      }
+
+      div.appendChild(indicator);
+      div.appendChild(body);
+      stepsEl.appendChild(div);
+    });
+  }
+
+  window.addEventListener('message', (event) => {
+    const msg = event.data;
+    if (msg.type === 'update') render(msg.steps, msg.idle);
+  });
+
+  vscode.postMessage({ type: 'ready' });
+})();
+</script>
+</body>
+</html>`
+    );
+  }
+};
+
 // src/extension.ts
 var HF_SUGGESTED_MODELS = [
   "Qwen/Qwen2.5-Coder-7B-Instruct",
@@ -1037,6 +1368,10 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
   activeSessionId = "";
   log;
   ollamaTerminal;
+  progressProvider;
+  setProgressProvider(p) {
+    this.progressProvider = p;
+  }
   getActiveSession() {
     return this.sessions.find((s) => s.id === this.activeSessionId);
   }
@@ -1434,6 +1769,12 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
     this.postMessage({
       type: "assistantStart"
     });
+    this.progressProvider?.setSteps([
+      { label: "Reading your message", status: "done" },
+      { label: `Sending to ${provider} (${model.split("/").pop() ?? model})`, status: "active", detail: mode !== "agent" ? mode + " mode" : void 0 },
+      { label: "Streaming response", status: "pending" },
+      { label: "Done", status: "pending" }
+    ]);
     try {
       const responseText = await this.dispatchChat({
         provider,
@@ -1443,6 +1784,7 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
         onDelta: (t) => {
           if (generation === this.requestGeneration) {
             this.postMessage({ type: "assistantDelta", text: t });
+            this.progressProvider?.activateStep(2);
           }
         }
       });
@@ -1463,6 +1805,12 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
         type: "status",
         status: "Idle"
       });
+      this.progressProvider?.allDone();
+      setTimeout(() => {
+        if (generation === this.requestGeneration) {
+          this.progressProvider?.clear();
+        }
+      }, 3e3);
     } catch (error) {
       if (generation !== this.requestGeneration) {
         return;
@@ -1470,6 +1818,12 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
       if (error instanceof Error && error.name === "AbortError") {
         this.postMessage({ type: "assistantAbort" });
         this.postMessage({ type: "status", status: "Idle" });
+        this.progressProvider?.setSteps([
+          { label: "Stopped by user", status: "error" }
+        ]);
+        setTimeout(() => {
+          this.progressProvider?.clear();
+        }, 2e3);
         return;
       }
       const messageText = error instanceof Error ? error.message : "Unknown error while calling the model.";
@@ -1482,6 +1836,12 @@ var OllamaCoderChatViewProvider = class _OllamaCoderChatViewProvider {
         type: "status",
         status: "Error"
       });
+      this.progressProvider?.setSteps([
+        { label: "Error", status: "error", detail: messageText.slice(0, 80) }
+      ]);
+      setTimeout(() => {
+        this.progressProvider?.clear();
+      }, 4e3);
     } finally {
       if (generation === this.requestGeneration) {
         this.abortController = void 0;
@@ -2094,21 +2454,29 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
     }
     try {
       await vscode2.workspace.fs.readFile(targetUri);
-      const rel = vscode2.workspace.asRelativePath(targetUri);
+      const rel2 = vscode2.workspace.asRelativePath(targetUri);
       const choice = await vscode2.window.showInformationMessage(
-        `Apply AI-proposed changes to ${rel}? This will overwrite its current contents.`,
+        `Apply AI-proposed changes to ${rel2}? This will overwrite its current contents.`,
         "Apply",
         "Cancel"
       );
       if (choice !== "Apply") return;
     } catch {
     }
+    const rel = vscode2.workspace.asRelativePath(targetUri);
+    this.progressProvider?.setSteps([
+      { label: "Writing file", status: "active", detail: rel }
+    ]);
     await vscode2.workspace.fs.writeFile(targetUri, new TextEncoder().encode(code));
     const doc = await vscode2.workspace.openTextDocument(targetUri);
     await vscode2.window.showTextDocument(doc, { preview: false });
     void vscode2.window.showInformationMessage(
-      `OllamaUnofficial: Applied \u2192 ${vscode2.workspace.asRelativePath(targetUri)}`
+      `OllamaUnofficial: Applied \u2192 ${rel}`
     );
+    this.progressProvider?.allDone();
+    setTimeout(() => {
+      this.progressProvider?.clear();
+    }, 2500);
   }
   async handleGetWorkspaceTree() {
     const folders = vscode2.workspace.workspaceFolders;
@@ -2163,8 +2531,14 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
     if (!this.ollamaTerminal || this.ollamaTerminal.exitStatus !== void 0) {
       this.ollamaTerminal = vscode2.window.createTerminal({ name: "OllamaUnofficial" });
     }
+    this.progressProvider?.setSteps([
+      { label: "Running in terminal", status: "active", detail: command.slice(0, 60) }
+    ]);
     this.ollamaTerminal.show();
     this.ollamaTerminal.sendText(command);
+    setTimeout(() => {
+      this.progressProvider?.clear();
+    }, 2e3);
   }
   // Git operations
   async handleGitStatus() {
@@ -2172,6 +2546,7 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
       void vscode2.window.showWarningMessage("OllamaUnofficial: Enable git access in the settings first.");
       return;
     }
+    this.progressProvider?.setSteps([{ label: "Getting git status", status: "active" }]);
     try {
       const gitExt = vscode2.extensions.getExtension("vscode.git");
       if (!gitExt) {
@@ -2194,7 +2569,15 @@ data:${mime};base64,${b64.substring(0, 200)}\u2026 (${bytes.byteLength} bytes)`)
       const lines = changes.map((c) => `${statusMap[c.status] ?? " M"}  ${vscode2.workspace.asRelativePath(c.uri)}`);
       this.postMessage({ type: "gitResult", op: "status", output: `Changes:
 ${lines.join("\n")}` });
+      this.progressProvider?.allDone();
+      setTimeout(() => {
+        this.progressProvider?.clear();
+      }, 2e3);
     } catch (err) {
+      this.progressProvider?.errorStep(0, String(err instanceof Error ? err.message : err).slice(0, 60));
+      setTimeout(() => {
+        this.progressProvider?.clear();
+      }, 3e3);
       this.postMessage({ type: "gitResult", op: "status", output: `Error: ${err instanceof Error ? err.message : String(err)}` });
     }
   }
@@ -2224,6 +2607,10 @@ ${lines.join("\n")}` });
       "Cancel"
     );
     if (choice !== "Commit") return;
+    this.progressProvider?.setSteps([
+      { label: "Staging changes", status: "done" },
+      { label: "Committing", status: "active", detail: commitMessage.slice(0, 60) }
+    ]);
     try {
       const gitExt = vscode2.extensions.getExtension("vscode.git");
       if (!gitExt) return;
@@ -2237,7 +2624,15 @@ ${lines.join("\n")}` });
       await repo.commit(commitMessage, { all: false });
       void vscode2.window.showInformationMessage(`Committed: '${commitMessage}'`);
       this.postMessage({ type: "gitResult", op: "commit", output: `Committed: '${commitMessage}'` });
+      this.progressProvider?.allDone();
+      setTimeout(() => {
+        this.progressProvider?.clear();
+      }, 2500);
     } catch (err) {
+      this.progressProvider?.errorStep(1, String(err instanceof Error ? err.message : err).slice(0, 60));
+      setTimeout(() => {
+        this.progressProvider?.clear();
+      }, 3e3);
       void vscode2.window.showErrorMessage(`Commit failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
@@ -2248,10 +2643,23 @@ ${lines.join("\n")}` });
     }
     const choice = await vscode2.window.showWarningMessage("Push current branch to remote?", { modal: true }, "Push", "Cancel");
     if (choice !== "Push") return;
+    this.progressProvider?.setSteps([
+      { label: "Connecting to remote", status: "active" },
+      { label: "Pushing branch", status: "pending" }
+    ]);
     try {
+      this.progressProvider?.activateStep(1);
       await vscode2.commands.executeCommand("git.push");
       this.postMessage({ type: "gitResult", op: "push", output: "Pushed to remote successfully." });
+      this.progressProvider?.allDone();
+      setTimeout(() => {
+        this.progressProvider?.clear();
+      }, 2500);
     } catch (err) {
+      this.progressProvider?.errorStep(1, String(err instanceof Error ? err.message : err).slice(0, 60));
+      setTimeout(() => {
+        this.progressProvider?.clear();
+      }, 3e3);
       void vscode2.window.showErrorMessage(`Push failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
@@ -2471,8 +2879,13 @@ async function promptForSecret(context, secretKey, title, placeholder) {
 }
 function activate(context) {
   const provider = new OllamaCoderChatViewProvider(context);
+  const progressProvider = new ProgressViewProvider();
+  provider.setProgressProvider(progressProvider);
   context.subscriptions.push(
     vscode2.window.registerWebviewViewProvider(OllamaCoderChatViewProvider.viewType, provider)
+  );
+  context.subscriptions.push(
+    vscode2.window.registerWebviewViewProvider(ProgressViewProvider.viewType, progressProvider)
   );
   context.subscriptions.push(
     vscode2.commands.registerCommand("ollamaCoderChat.focus", async () => {

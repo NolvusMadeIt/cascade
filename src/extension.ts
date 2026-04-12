@@ -14,6 +14,7 @@ import { streamOllamaChat } from './llm/ollamaStream';
 import { openAiNonStream, streamOpenAiCompatibleChat } from './llm/openaiSseStream';
 import { SECRET_HUGGINGFACE, SECRET_OPENROUTER } from './secrets';
 import { BrowserPanel } from './browserPanel';
+import { ProgressViewProvider } from './progressPanel';
 
 type ChatMessage = PersistedMessage;
 
@@ -102,6 +103,11 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
   private activeSessionId = '';
   private readonly log: vscode.OutputChannel;
   private ollamaTerminal?: vscode.Terminal;
+  private progressProvider?: ProgressViewProvider;
+
+  public setProgressProvider(p: ProgressViewProvider): void {
+    this.progressProvider = p;
+  }
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.log = vscode.window.createOutputChannel('OllamaUnofficial');
@@ -608,6 +614,14 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
       type: 'assistantStart',
     });
 
+    // Progress panel — show steps for this request
+    this.progressProvider?.setSteps([
+      { label: 'Reading your message', status: 'done' },
+      { label: `Sending to ${provider} (${model.split('/').pop() ?? model})`, status: 'active', detail: mode !== 'agent' ? mode + ' mode' : undefined },
+      { label: 'Streaming response', status: 'pending' },
+      { label: 'Done', status: 'pending' },
+    ]);
+
     try {
       const responseText = await this.dispatchChat({
         provider,
@@ -617,6 +631,8 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
         onDelta: (t) => {
           if (generation === this.requestGeneration) {
             this.postMessage({ type: 'assistantDelta', text: t });
+            // Switch to streaming step once tokens start arriving
+            this.progressProvider?.activateStep(2);
           }
         },
       });
@@ -642,6 +658,14 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
         type: 'status',
         status: 'Idle',
       });
+
+      // All done — complete all steps then clear after a moment
+      this.progressProvider?.allDone();
+      setTimeout(() => {
+        if (generation === this.requestGeneration) {
+          this.progressProvider?.clear();
+        }
+      }, 3000);
     } catch (error) {
       if (generation !== this.requestGeneration) {
         return;
@@ -650,6 +674,10 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
       if (error instanceof Error && error.name === 'AbortError') {
         this.postMessage({ type: 'assistantAbort' });
         this.postMessage({ type: 'status', status: 'Idle' });
+        this.progressProvider?.setSteps([
+          { label: 'Stopped by user', status: 'error' },
+        ]);
+        setTimeout(() => { this.progressProvider?.clear(); }, 2000);
         return;
       }
 
@@ -667,6 +695,11 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
         type: 'status',
         status: 'Error',
       });
+
+      this.progressProvider?.setSteps([
+        { label: 'Error', status: 'error', detail: messageText.slice(0, 80) },
+      ]);
+      setTimeout(() => { this.progressProvider?.clear(); }, 4000);
     } finally {
       if (generation === this.requestGeneration) {
         this.abortController = undefined;
@@ -1437,12 +1470,18 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
       if (choice !== 'Apply') return;
     } catch { /* file does not exist yet — create it */ }
 
+    const rel = vscode.workspace.asRelativePath(targetUri);
+    this.progressProvider?.setSteps([
+      { label: 'Writing file', status: 'active', detail: rel },
+    ]);
     await vscode.workspace.fs.writeFile(targetUri, new TextEncoder().encode(code));
     const doc = await vscode.workspace.openTextDocument(targetUri);
     await vscode.window.showTextDocument(doc, { preview: false });
     void vscode.window.showInformationMessage(
-      `OllamaUnofficial: Applied → ${vscode.workspace.asRelativePath(targetUri)}`
+      `OllamaUnofficial: Applied → ${rel}`
     );
+    this.progressProvider?.allDone();
+    setTimeout(() => { this.progressProvider?.clear(); }, 2500);
   }
 
   private async handleGetWorkspaceTree(): Promise<void> {
@@ -1494,8 +1533,12 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
     if (!this.ollamaTerminal || this.ollamaTerminal.exitStatus !== undefined) {
       this.ollamaTerminal = vscode.window.createTerminal({ name: 'OllamaUnofficial' });
     }
+    this.progressProvider?.setSteps([
+      { label: 'Running in terminal', status: 'active', detail: command.slice(0, 60) },
+    ]);
     this.ollamaTerminal.show();
     this.ollamaTerminal.sendText(command);
+    setTimeout(() => { this.progressProvider?.clear(); }, 2000);
   }
 
   // Git operations
@@ -1505,6 +1548,7 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
       void vscode.window.showWarningMessage('OllamaUnofficial: Enable git access in the settings first.');
       return;
     }
+    this.progressProvider?.setSteps([{ label: 'Getting git status', status: 'active' }]);
     try {
       const gitExt = vscode.extensions.getExtension('vscode.git');
       if (!gitExt) { this.postMessage({ type: 'gitResult', op: 'status', output: 'Git extension not available.' } as any); return; }
@@ -1517,7 +1561,11 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
       const statusMap: Record<number, string> = { 0: ' M', 1: ' A', 2: ' D', 5: 'MM', 6: '??' };
       const lines = changes.map((c: any) => `${statusMap[c.status] ?? ' M'}  ${vscode.workspace.asRelativePath(c.uri)}`);
       this.postMessage({ type: 'gitResult', op: 'status', output: `Changes:\n${lines.join('\n')}` } as any);
+      this.progressProvider?.allDone();
+      setTimeout(() => { this.progressProvider?.clear(); }, 2000);
     } catch (err) {
+      this.progressProvider?.errorStep(0, String(err instanceof Error ? err.message : err).slice(0, 60));
+      setTimeout(() => { this.progressProvider?.clear(); }, 3000);
       this.postMessage({ type: 'gitResult', op: 'status', output: `Error: ${err instanceof Error ? err.message : String(err)}` } as any);
     }
   }
@@ -1548,6 +1596,10 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
       'Commit', 'Cancel'
     );
     if (choice !== 'Commit') return;
+    this.progressProvider?.setSteps([
+      { label: 'Staging changes', status: 'done' },
+      { label: 'Committing', status: 'active', detail: commitMessage.slice(0, 60) },
+    ]);
     try {
       const gitExt = vscode.extensions.getExtension('vscode.git');
       if (!gitExt) return;
@@ -1558,7 +1610,11 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
       await repo.commit(commitMessage, { all: false });
       void vscode.window.showInformationMessage(`Committed: '${commitMessage}'`);
       this.postMessage({ type: 'gitResult', op: 'commit', output: `Committed: '${commitMessage}'` } as any);
+      this.progressProvider?.allDone();
+      setTimeout(() => { this.progressProvider?.clear(); }, 2500);
     } catch (err) {
+      this.progressProvider?.errorStep(1, String(err instanceof Error ? err.message : err).slice(0, 60));
+      setTimeout(() => { this.progressProvider?.clear(); }, 3000);
       void vscode.window.showErrorMessage(`Commit failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
@@ -1570,10 +1626,19 @@ class OllamaCoderChatViewProvider implements vscode.WebviewViewProvider {
     }
     const choice = await vscode.window.showWarningMessage('Push current branch to remote?', { modal: true }, 'Push', 'Cancel');
     if (choice !== 'Push') return;
+    this.progressProvider?.setSteps([
+      { label: 'Connecting to remote', status: 'active' },
+      { label: 'Pushing branch', status: 'pending' },
+    ]);
     try {
+      this.progressProvider?.activateStep(1);
       await vscode.commands.executeCommand('git.push');
       this.postMessage({ type: 'gitResult', op: 'push', output: 'Pushed to remote successfully.' } as any);
+      this.progressProvider?.allDone();
+      setTimeout(() => { this.progressProvider?.clear(); }, 2500);
     } catch (err) {
+      this.progressProvider?.errorStep(1, String(err instanceof Error ? err.message : err).slice(0, 60));
+      setTimeout(() => { this.progressProvider?.clear(); }, 3000);
       void vscode.window.showErrorMessage(`Push failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
@@ -1804,9 +1869,15 @@ async function promptForSecret(
 
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new OllamaCoderChatViewProvider(context);
+  const progressProvider = new ProgressViewProvider();
+  provider.setProgressProvider(progressProvider);
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(OllamaCoderChatViewProvider.viewType, provider)
+  );
+
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(ProgressViewProvider.viewType, progressProvider)
   );
 
   context.subscriptions.push(
