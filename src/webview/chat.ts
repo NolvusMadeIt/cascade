@@ -1,1199 +1,893 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 
-declare function acquireVsCodeApi(): {
-  postMessage(message: unknown): void;
-};
-
-type ChatMode = 'agent' | 'ask' | 'plan';
-
-type AttachmentChip = {
-  id: string;
-  label: string;
-};
-
-type ThreadMessage = {
-  role: string;
-  content: string;
-};
-
-type SessionTab = {
-  id: string;
-  title: string;
-};
-
-type HistoryItem = {
-  id: string;
-  title: string;
-  preview: string;
-  updatedAt: number;
-  archived: boolean;
-  messageCount: number;
-};
-
+declare function acquireVsCodeApi(): { postMessage(msg: unknown): void };
 const vscode = acquireVsCodeApi();
 
-marked.setOptions({
-  gfm: true,
-  breaks: false,
-});
+// ── Marked config ────────────────────────────────────────────────────
+marked.setOptions({ gfm: true, breaks: false });
 
-function getEl<T extends HTMLElement>(id: string): T {
-  const el = document.getElementById(id) as T | null;
-
-  if (!el) {
-    throw new Error(`Ollama chat webview: missing #${id}`);
-  }
-
-  return el;
-}
-
-function getElOpt<T extends HTMLElement>(id: string): T | null {
-  return document.getElementById(id) as T | null;
-}
-
-function renderMarkdown(text: string): string {
+function md(text: string): string {
   const raw = marked.parse(text, { async: false }) as string;
   return DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } });
 }
 
-/** Extract <think>...</think> blocks from a raw AI response.
- *  Returns the visible text (thinking stripped) and all captured thinking. */
-function stripThinkingBlocks(text: string): { visible: string; thinking: string } {
-  let thinking = '';
-  // Remove complete <think>...</think> blocks
-  let visible = text.replace(/<think>([\s\S]*?)<\/think>/g, (_match, inner: string) => {
-    thinking += (thinking ? '\n\n' : '') + inner.trim();
-    return '';
-  }).trim();
-  const headingMatch = /^### Reasoning\s+([\s\S]*?)\s+### Answer\s+([\s\S]*)$/m.exec(visible);
-  if (headingMatch) {
-    thinking += (thinking ? '\n\n' : '') + headingMatch[1].trim();
-    visible = headingMatch[2].trim();
-  }
-  // If there's an unclosed <think> at the end (still streaming), strip it too
-  const openIdx = visible.lastIndexOf('<think>');
-  if (openIdx !== -1) {
-    const tail = visible.slice(openIdx + 7).trim();
-    if (tail) {
-      thinking += (thinking ? '\n\n' : '') + tail;
-    }
-    visible = visible.slice(0, openIdx).trim();
-  }
-  return { visible, thinking };
+// ── Helpers ──────────────────────────────────────────────────────────
+function el<T extends HTMLElement>(id: string): T {
+  const e = document.getElementById(id) as T | null;
+  if (!e) throw new Error(`Cascade: missing #${id}`);
+  return e;
+}
+function opt<T extends HTMLElement>(id: string): T | null {
+  return document.getElementById(id) as T | null;
 }
 
-const SPINNER_HTML = `<div class="thinking-spinner"><div class="thinking-spinner-ring"></div><span>Working on it…</span></div>`;
+// ── DOM refs ─────────────────────────────────────────────────────────
+const promptEl        = el<HTMLTextAreaElement>('prompt');
+const msgsEl          = el<HTMLElement>('msgs');
+const emptyEl         = el<HTMLElement>('empty');
+const statusDot       = el<HTMLElement>('statusDot');
+const statusTxt       = el<HTMLElement>('statusTxt');
+const sendBtn         = el<HTMLButtonElement>('sendBtn');
+const newChatBtn      = el<HTMLButtonElement>('newChatBtn');
+const refreshBtn      = el<HTMLButtonElement>('refreshBtn');
+const historyBtn      = el<HTMLButtonElement>('historyBtn');
+const settingsBtn     = el<HTMLButtonElement>('settingsBtn');
+const modelSel        = el<HTMLSelectElement>('modelSel');
+const providerSel     = el<HTMLSelectElement>('providerSel');
+const tabsBar         = el<HTMLElement>('tabsBar');
+const attachBtn       = el<HTMLButtonElement>('attachBtn');
+const browseBtn       = opt<HTMLButtonElement>('browseBtn');
+const attachMenu      = el<HTMLElement>('attachMenu');
+const attachSearch    = el<HTMLInputElement>('attachSearch');
+const chipsEl         = el<HTMLElement>('chips');
+const modeAgent       = el<HTMLButtonElement>('modeAgent');
+const modeAsk         = el<HTMLButtonElement>('modeAsk');
+const modePlan        = el<HTMLButtonElement>('modePlan');
 
-function enhanceCodeBlocks(root: HTMLElement): void {
-  root.querySelectorAll('pre').forEach((pre) => {
-    if (pre.querySelector('.code-actions')) return;
+// Main / overlay refs
+const mainView        = el<HTMLElement>('mainView');
+const settingsOverlay = el<HTMLElement>('settingsOverlay');
+const historyOverlay  = el<HTMLElement>('historyOverlay');
 
-    const actions = document.createElement('div');
-    actions.className = 'code-actions';
+// Settings form
+const settingsClose   = el<HTMLButtonElement>('settingsClose');
+const settingsCancel  = el<HTMLButtonElement>('settingsCancel');
+const settingsSave    = el<HTMLButtonElement>('settingsSave');
+const settingsToast   = el<HTMLElement>('settingsToast');
+const logoutBtn       = el<HTMLButtonElement>('logoutBtn');
+const clearHistBtn    = opt<HTMLButtonElement>('clearHistBtn');
+const inpOrKey        = el<HTMLInputElement>('inpOrKey');
+const inpHfKey        = el<HTMLInputElement>('inpHfKey');
+const inpGroqKey      = el<HTMLInputElement>('inpGroqKey');
+const eyeOr           = el<HTMLButtonElement>('eyeOr');
+const eyeHf           = el<HTMLButtonElement>('eyeHf');
+const eyeGroq         = el<HTMLButtonElement>('eyeGroq');
+const hintOr          = el<HTMLElement>('hintOr');
+const hintHf          = el<HTMLElement>('hintHf');
+const hintGroq        = el<HTMLElement>('hintGroq');
+const inpTemp         = el<HTMLInputElement>('inpTemp');
+const inpMaxTok       = el<HTMLInputElement>('inpMaxTok');
+const inpTopP         = el<HTMLInputElement>('inpTopP');
+const inpCtxLen       = opt<HTMLInputElement>('inpCtxLen');
+const inpUserName     = opt<HTMLInputElement>('inpUserName');
+const inpSystemPrompt = opt<HTMLTextAreaElement>('inpSystemPrompt');
+const selFallback     = opt<HTMLSelectElement>('selFallback');
+const selHistory      = opt<HTMLSelectElement>('selHistory');
+const selApproval     = el<HTMLSelectElement>('selApproval');
+const selFileAccess   = el<HTMLSelectElement>('selFileAccess');
+const selFileScope    = el<HTMLSelectElement>('selFileScope');
+const chkTerminal     = el<HTMLInputElement>('chkTerminal');
+const chkGit          = el<HTMLInputElement>('chkGit');
+const chkFreeOnly     = el<HTMLInputElement>('chkFreeOnly');
 
-    // Copy button (always)
-    const copyBtn = document.createElement('button');
-    copyBtn.type = 'button';
-    copyBtn.className = 'code-action-btn';
-    copyBtn.textContent = 'Copy';
-    copyBtn.addEventListener('click', () => {
-      const code = pre.querySelector('code');
-      void navigator.clipboard.writeText(code?.textContent ?? '');
-      copyBtn.textContent = 'Copied!';
-      window.setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1400);
-    });
-    actions.appendChild(copyBtn);
+// History
+const historyClose    = el<HTMLButtonElement>('historyClose');
 
-    // Detect language from class
-    const codeEl = pre.querySelector('code');
-    const langClass = codeEl?.className ?? '';
-    const langMatch = /language-(\w+)/.exec(langClass);
-    const language = langMatch?.[1] ?? '';
+// Progress panel
+const progressPanel   = el<HTMLElement>('progressPanel');
+const progressList    = el<HTMLElement>('progressList');
+const pgrCollapse     = el<HTMLButtonElement>('pgrCollapse');
 
-    // Detect file path from first comment line in code
-    const rawCode = codeEl?.textContent ?? '';
-    const firstLine = rawCode.split('\n')[0].trim();
-    const fileMatch = /(?:\/\/|#|<!--)\s*[Ff]ile:\s*(.+?)(?:\s*-->)?$/.exec(firstLine);
-    const suggestedPath = fileMatch?.[1]?.trim();
-
-    // Apply to File button (for non-shell, non-output code blocks)
-    const isShell = /^(bash|sh|shell|zsh|fish|powershell|ps1|cmd|batch)$/i.test(language);
-    const isOutput = /^(text|output|log|plain)$/i.test(language);
-
-    if (!isOutput) {
-      const applyBtn = document.createElement('button');
-      applyBtn.type = 'button';
-      applyBtn.className = 'code-action-btn code-action-apply';
-      applyBtn.textContent = suggestedPath ? `Apply → ${suggestedPath.split('/').pop() ?? suggestedPath}` : 'Apply to File';
-      applyBtn.title = suggestedPath ? `Apply to ${suggestedPath}` : 'Apply this code to a file in your workspace';
-      applyBtn.addEventListener('click', () => {
-        vscode.postMessage({
-          type: 'applyFileEdit',
-          code: rawCode,
-          language,
-          suggestedPath,
-        });
-      });
-      actions.appendChild(applyBtn);
-    }
-
-    // Run in Terminal button (for shell blocks)
-    if (isShell) {
-      const runBtn = document.createElement('button');
-      runBtn.type = 'button';
-      runBtn.className = 'code-action-btn code-action-run';
-      runBtn.textContent = '▶ Run';
-      runBtn.title = 'Run this command in the integrated terminal';
-      runBtn.addEventListener('click', () => {
-        vscode.postMessage({ type: 'runInTerminal', command: rawCode.trim() });
-      });
-      actions.appendChild(runBtn);
-    }
-
-    pre.appendChild(actions);
-  });
-}
-
-const promptEl = getEl<HTMLTextAreaElement>('prompt');
-const messagesEl = getEl<HTMLElement>('messages');
-const emptyStateEl = getEl<HTMLElement>('emptyState');
-const statusTextEl = getEl<HTMLElement>('statusText');
-const statusPillEl = getEl<HTMLElement>('statusPill');
-const sendBtn = getEl<HTMLButtonElement>('sendBtn');
-const newChatBtn = getEl<HTMLButtonElement>('newChatBtn');
-const refreshModelsBtn = getEl<HTMLButtonElement>('refreshModelsBtn');
-const modelSelect = getEl<HTMLSelectElement>('modelSelect');
-const providerSelect = getEl<HTMLSelectElement>('providerSelect');
-const historyBtn = getEl<HTMLButtonElement>('historyBtn');
-const helpBtn = getEl<HTMLButtonElement>('helpBtn');
-const sessionBar = getEl<HTMLElement>('sessionBar');
-const attachBtn = getEl<HTMLButtonElement>('attachBtn');
-const browseBtn = getElOpt<HTMLButtonElement>('browseBtn');
-const attachMenu = getEl<HTMLElement>('attachMenu');
-const attachSearch = getEl<HTMLInputElement>('attachSearch');
-const attachmentRow = getEl<HTMLElement>('attachmentRow');
-const modeAgent = getEl<HTMLButtonElement>('modeAgent');
-const modeAsk = getEl<HTMLButtonElement>('modeAsk');
-const modePlan = getEl<HTMLButtonElement>('modePlan');
-const settingsBtn = getEl<HTMLButtonElement>('settingsBtn');
-const mainView = getEl<HTMLElement>('mainView');
-const settingsOverlay = getEl<HTMLElement>('settingsOverlay');
-const settingsCloseBtn = getEl<HTMLButtonElement>('settingsCloseBtn');
-const settingsCancelBtn = getEl<HTMLButtonElement>('settingsCancelBtn');
-const settingsSaveBtn = getEl<HTMLButtonElement>('settingsSaveBtn');
-const settingsSavedToast = getEl<HTMLElement>('settingsSavedToast');
-const logoutBtn = getEl<HTMLButtonElement>('logoutBtn');
-const inputOpenRouterKey = getEl<HTMLInputElement>('inputOpenRouterKey');
-const inputHfKey = getEl<HTMLInputElement>('inputHfKey');
-const inputTemperature = getEl<HTMLInputElement>('inputTemperature');
-const inputMaxTokens = getEl<HTMLInputElement>('inputMaxTokens');
-const inputTopP = getEl<HTMLInputElement>('inputTopP');
-const chkOpenRouterFreeOnly = getEl<HTMLInputElement>('chkOpenRouterFreeOnly');
-const orKeyHint = getEl<HTMLElement>('orKeyHint');
-const hfKeyHint = getEl<HTMLElement>('hfKeyHint');
-const settingsPanelInner = getEl<HTMLElement>('settingsPanelInner');
-const toggleOrKey = getEl<HTMLButtonElement>('toggleOrKey');
-const toggleHfKey = getEl<HTMLButtonElement>('toggleHfKey');
-const selectFileAccess = getEl<HTMLSelectElement>('selectFileAccess');
-const selectFileScope = getEl<HTMLSelectElement>('selectFileScope');
-const selectApprovalMode = getEl<HTMLSelectElement>('selectApprovalMode');
-const chkTerminalAccess = getEl<HTMLInputElement>('chkTerminalAccess');
-const chkGitAccess = getEl<HTMLInputElement>('chkGitAccess');
-const historyOverlay = getEl<HTMLElement>('historyOverlay');
-const historyPanelInner = getEl<HTMLElement>('historyPanelInner');
-const historyCloseBtn = getEl<HTMLButtonElement>('historyCloseBtn');
-const historySearch = getEl<HTMLInputElement>('historySearch');
-const historyList = getEl<HTMLElement>('historyList');
-
-settingsPanelInner.addEventListener('click', (event) => {
-  event.stopPropagation();
-});
-historyPanelInner.addEventListener('click', (event) => {
-  event.stopPropagation();
-});
-
-let busy = false;
-let pendingAssistantBubble: HTMLElement | null = null;
-let pendingAssistantWrapper: HTMLElement | null = null;
-let mode: ChatMode = 'agent';
-let attachments: AttachmentChip[] = [];
-let ignoreModelSelectChange = false;
-let sessions: SessionTab[] = [];
-let activeSessionId = '';
-let historyItems: HistoryItem[] = [];
-let historyRange: 'all' | 'today' | 'week' | 'month' = 'all';
-
-function setBusy(isBusy: boolean): void {
-  busy = isBusy;
-  refreshModelsBtn.toggleAttribute('disabled', isBusy);
-  modelSelect.disabled = isBusy;
-  providerSelect.disabled = isBusy;
-  sendBtn.toggleAttribute('disabled', isBusy);
-  newChatBtn.toggleAttribute('disabled', isBusy);
-  settingsBtn.toggleAttribute('disabled', isBusy);
-  historyBtn.toggleAttribute('disabled', isBusy);
-}
-
-function setStatus(text: string): void {
-  statusTextEl.textContent = text;
-  if (text === 'Error') {
-    statusPillEl.classList.add('error');
-  } else {
-    statusPillEl.classList.remove('error');
-  }
-}
-
-function updateEmptyState(): void {
-  emptyStateEl.style.display = messagesEl.children.length ? 'none' : 'flex';
-}
-
-function setModels(models: unknown, selectedModel: unknown): void {
-  ignoreModelSelectChange = true;
-  modelSelect.innerHTML = '';
-  const safeModels = Array.isArray(models) ? models.map(String) : [];
-
-  safeModels.forEach((modelName) => {
-    const option = document.createElement('option');
-    option.value = modelName;
-    option.textContent = modelName;
-    option.selected = modelName === selectedModel;
-    modelSelect.appendChild(option);
-  });
-
-  if (!safeModels.length) {
-    const option = document.createElement('option');
-    option.value = String(selectedModel ?? '');
-    option.textContent = String(selectedModel ?? 'No models found');
-    option.selected = true;
-    modelSelect.appendChild(option);
-  } else {
-    const sel = String(selectedModel ?? '');
-    if ([...modelSelect.options].some((o) => o.value === sel)) {
-      modelSelect.value = sel;
-    }
-  }
-
-  ignoreModelSelectChange = false;
-}
-
-function renderSessionBar(): void {
-  sessionBar.innerHTML = '';
-
-  for (const s of sessions) {
-    const tab = document.createElement('button');
-    tab.type = 'button';
-    tab.className = `session-tab${s.id === activeSessionId ? ' active' : ''}`;
+// ── Progress panel helpers ────────────────────────────────────────
+function showProgressPanel(steps: string[]): void {
+  progressList.innerHTML = '';
+  steps.forEach((text, i) => {
+    const item = document.createElement('div');
+    item.className = 'cd-progress-item pending';
+    item.dataset.idx = String(i);
+    const dot = document.createElement('span');
+    dot.className = 'cd-pgr-dot';
+    dot.textContent = String(i + 1);
     const label = document.createElement('span');
-    label.className = 'session-tab-label';
-    label.textContent = s.title;
-    tab.appendChild(label);
-
-    const rename = document.createElement('span');
-    rename.className = 'session-rename';
-    rename.setAttribute('role', 'button');
-    rename.setAttribute('aria-label', 'Rename tab');
-    rename.title = 'Rename';
-    rename.textContent = '✎';
-    rename.addEventListener('click', (event) => {
-      event.stopPropagation();
-      vscode.postMessage({ type: 'renameSession', id: s.id });
-    });
-    tab.appendChild(rename);
-
-    tab.addEventListener('click', () => {
-      vscode.postMessage({ type: 'switchSession', id: s.id });
-    });
-
-    if (sessions.length > 1) {
-      const close = document.createElement('span');
-      close.className = 'session-close';
-      close.setAttribute('role', 'button');
-      close.setAttribute('aria-label', 'Close tab');
-      close.textContent = '×';
-      close.addEventListener('click', (event) => {
-        event.stopPropagation();
-        vscode.postMessage({ type: 'closeSession', id: s.id });
-      });
-      tab.appendChild(close);
-    }
-
-    sessionBar.appendChild(tab);
-  }
+    label.className = 'cd-pgr-text';
+    label.textContent = text;
+    item.appendChild(dot);
+    item.appendChild(label);
+    progressList.appendChild(item);
+  });
+  progressPanel.classList.remove('hidden', 'collapsed');
 }
 
-function openSettingsPanel(): void {
-  historyOverlay.classList.add('hidden');
-  historyOverlay.setAttribute('aria-hidden', 'true');
-  vscode.postMessage({ type: 'getSettings' });
+function completeProgressPanel(): void {
+  progressList.querySelectorAll<HTMLElement>('.cd-progress-item').forEach(item => {
+    item.className = 'cd-progress-item done';
+    const dot = item.querySelector<HTMLElement>('.cd-pgr-dot');
+    if (dot) dot.textContent = '✓';
+  });
 }
 
-function closeSettingsPanel(): void {
-  settingsOverlay.classList.add('hidden');
-  settingsOverlay.setAttribute('aria-hidden', 'true');
-  mainView.classList.remove('hidden');
+function hideProgressPanel(): void {
+  progressPanel.classList.add('hidden');
+  progressList.innerHTML = '';
 }
 
-function openHistoryPanel(): void {
-  closeSettingsPanel();
-  vscode.postMessage({ type: 'getHistory' });
-  mainView.classList.add('hidden');
-  historyOverlay.classList.remove('hidden');
-  historyOverlay.setAttribute('aria-hidden', 'false');
-  historySearch.focus();
+pgrCollapse.addEventListener('click', () => progressPanel.classList.toggle('collapsed'));
+const histSearch      = el<HTMLInputElement>('histSearch');
+const histList        = el<HTMLElement>('histList');
+
+// ── State ────────────────────────────────────────────────────────────
+type ChatMode = 'agent' | 'ask' | 'plan';
+type Attachment = { id: string; label: string };
+type HistItem = { id: string; title: string; preview: string; updatedAt: number; archived: boolean; messageCount: number };
+type TabItem  = { id: string; title: string };
+
+let busy         = false;
+let mode: ChatMode = 'agent';
+let activeSession = '';
+let tabs: TabItem[] = [];
+let histItems: HistItem[] = [];
+let histRange: 'all'|'today'|'week'|'month' = 'all';
+let attachments: Attachment[] = [];
+let ignoreModelChange = false;
+let pendingBubble: HTMLElement | null = null;
+let pendingWrapper: HTMLElement | null = null;
+
+// ── Status ───────────────────────────────────────────────────────────
+function setStatus(text: string, state: 'idle'|'busy'|'error' = 'idle'): void {
+  statusTxt.textContent = text;
+  statusDot.parentElement!.className = `cd-status-left ${state}`;
 }
 
-function closeHistoryPanel(): void {
-  historyOverlay.classList.add('hidden');
-  historyOverlay.setAttribute('aria-hidden', 'true');
-  mainView.classList.remove('hidden');
+// ── Busy ─────────────────────────────────────────────────────────────
+function setBusy(val: boolean): void {
+  busy = val;
+  sendBtn.disabled    = val;
+  newChatBtn.disabled = val;
+  settingsBtn.disabled = val;
+  historyBtn.disabled = val;
+  refreshBtn.disabled = val;
+  modelSel.disabled   = val;
+  providerSel.disabled = val;
+  if (val) { setStatus('Working…', 'busy'); }
+  else     { setStatus('Ready', 'idle'); }
 }
 
-function applySettingsForm(message: Record<string, unknown>): void {
-  orKeyHint.textContent = message.hasOpenRouterKey ? '(saved)' : '';
-  hfKeyHint.textContent = message.hasHuggingfaceKey ? '(saved)' : '';
-
-  // Reset password fields (never prefill secrets)
-  inputOpenRouterKey.value = '';
-  inputOpenRouterKey.type = 'password';
-  toggleOrKey.textContent = '👁';
-  inputHfKey.value = '';
-  inputHfKey.type = 'password';
-  toggleHfKey.textContent = '👁';
-
-  inputTemperature.value = String(message.temperature ?? 0.2);
-  inputMaxTokens.value = String(message.maxTokens ?? 4096);
-  inputTopP.value = String(message.topP ?? 1);
-  chkOpenRouterFreeOnly.checked = Boolean(message.openRouterFreeOnly);
-  selectFileAccess.value = String(message.fileAccess ?? 'none');
-  selectFileScope.value = String(message.fileScope ?? 'workspace');
-  selectApprovalMode.value = String(message.approvalMode ?? 'ask');
-  chkTerminalAccess.checked = Boolean(message.terminalAccess);
-  chkGitAccess.checked = Boolean(message.gitAccess);
-  updateCapabilityBadges(String(message.fileAccess ?? 'none'), Boolean(message.terminalAccess), Boolean(message.gitAccess));
-
-  // Clear any leftover validation state
-  inputTemperature.classList.remove('invalid');
-  inputTopP.classList.remove('invalid');
-  inputMaxTokens.classList.remove('invalid');
-
-  mainView.classList.add('hidden');
-  closeHistoryPanel();
-  settingsOverlay.classList.remove('hidden');
-  settingsOverlay.setAttribute('aria-hidden', 'false');
-}
-
-function formatHistoryDate(value: number): string {
-  const date = new Date(value);
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date);
-}
-
-function isHistoryItemVisible(item: HistoryItem): boolean {
-  const query = historySearch.value.trim().toLowerCase();
-  const haystack = `${item.title} ${item.preview}`.toLowerCase();
-
-  if (query && !haystack.includes(query)) {
-    return false;
-  }
-
-  if (historyRange === 'all') {
-    return true;
-  }
-
-  const ageMs = Date.now() - item.updatedAt;
-  if (historyRange === 'today') {
-    return ageMs <= 24 * 60 * 60 * 1000;
-  }
-  if (historyRange === 'week') {
-    return ageMs <= 7 * 24 * 60 * 60 * 1000;
-  }
-  return ageMs <= 30 * 24 * 60 * 60 * 1000;
-}
-
-function renderHistoryList(): void {
-  historyList.innerHTML = '';
-  const visibleItems = historyItems.filter(isHistoryItemVisible);
-
-  if (!visibleItems.length) {
-    const empty = document.createElement('div');
-    empty.className = 'history-empty';
-    empty.textContent = 'No matching sessions yet.';
-    historyList.appendChild(empty);
-    return;
-  }
-
-  for (const item of visibleItems) {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = `history-item${item.id === activeSessionId ? ' active' : ''}`;
-    row.addEventListener('click', () => {
-      vscode.postMessage({
-        type: item.archived ? 'restoreSession' : 'switchSession',
-        id: item.id,
-      });
-      closeHistoryPanel();
-    });
-
-    const top = document.createElement('div');
-    top.className = 'history-item-top';
-    const title = document.createElement('span');
-    title.className = 'history-item-title';
-    title.textContent = item.title;
-    const meta = document.createElement('span');
-    meta.className = 'history-item-meta';
-    meta.textContent = `${formatHistoryDate(item.updatedAt)} · ${item.messageCount} msg${item.messageCount === 1 ? '' : 's'}${item.archived ? ' · archived' : ''}`;
-    top.appendChild(title);
-    top.appendChild(meta);
-
-    const preview = document.createElement('div');
-    preview.className = 'history-item-preview';
-    preview.textContent = item.preview || 'Empty conversation';
-
-    row.appendChild(top);
-    row.appendChild(preview);
-    historyList.appendChild(row);
-  }
-}
-
-function renderThread(msgs: ThreadMessage[]): void {
-  messagesEl.innerHTML = '';
-  pendingAssistantBubble = null;
-  pendingAssistantWrapper = null;
-
-  for (const m of msgs) {
-    if (m.role === 'user') {
-      createMessage('user', m.content);
-    } else if (m.role === 'assistant') {
-      const { bubble, wrapper } = createMessage('assistant', '');
-      const { visible, thinking } = stripThinkingBlocks(m.content);
-      if (thinking) {
-        const thinkingBlock = document.createElement('div');
-        thinkingBlock.className = 'thinking-block';
-        const toggleBtn = document.createElement('button');
-        toggleBtn.type = 'button';
-        toggleBtn.className = 'thinking-toggle-btn';
-        toggleBtn.innerHTML = `<span class="thinking-toggle-arrow">▶</span> Reasoning`;
-        thinkingBlock.appendChild(toggleBtn);
-        const thinkingContent = document.createElement('div');
-        thinkingContent.className = 'thinking-content';
-        thinkingContent.textContent = thinking;
-        thinkingBlock.appendChild(thinkingContent);
-        toggleBtn.addEventListener('click', () => {
-          const isOpen = thinkingContent.classList.toggle('visible');
-          const arrow = toggleBtn.querySelector<HTMLElement>('.thinking-toggle-arrow');
-          if (arrow) { arrow.textContent = isOpen ? '▼' : '▶'; }
-        });
-        wrapper.insertBefore(thinkingBlock, bubble);
-      }
-      bubble.className = 'bubble md';
-      bubble.innerHTML = renderMarkdown(visible || m.content);
-      enhanceCodeBlocks(bubble);
-    }
-  }
-
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-  updateEmptyState();
-}
-
-function syncModeUi(): void {
+// ── Mode ─────────────────────────────────────────────────────────────
+function syncMode(): void {
   modeAgent.classList.toggle('active', mode === 'agent');
   modeAsk.classList.toggle('active', mode === 'ask');
   modePlan.classList.toggle('active', mode === 'plan');
 }
 
-function updateCapabilityBadges(fileAccess: string, terminalAccess: boolean, gitAccess: boolean): void {
-  const capFile = getElOpt<HTMLElement>('capFile');
-  const capEdit = getElOpt<HTMLElement>('capEdit');
-  const capTerm = getElOpt<HTMLElement>('capTerm');
-  const capGit = getElOpt<HTMLElement>('capGit');
-  const capNav = getElOpt<HTMLElement>('capNav');
+// ── Empty state ───────────────────────────────────────────────────────
+function syncEmpty(): void {
+  emptyEl.style.display = msgsEl.children.length === 0 ? 'flex' : 'none';
+}
 
-  if (capFile) {
-    capFile.textContent = fileAccess === 'readwrite' ? 'Read+Write' : fileAccess === 'read' ? 'Read' : 'Off';
-    capFile.className = 'cap-val' + (fileAccess !== 'none' ? ' cap-on' : '');
-  }
-  if (capEdit) {
-    capEdit.textContent = fileAccess === 'readwrite' ? 'On' : 'Off';
-    capEdit.className = 'cap-val' + (fileAccess === 'readwrite' ? ' cap-on' : '');
-  }
-  if (capNav) {
-    capNav.textContent = fileAccess !== 'none' ? 'On' : 'Off';
-    capNav.className = 'cap-val' + (fileAccess !== 'none' ? ' cap-on' : '');
-  }
-  if (capTerm) {
-    capTerm.textContent = terminalAccess ? 'On' : 'Off';
-    capTerm.className = 'cap-val' + (terminalAccess ? ' cap-on' : '');
-  }
-  if (capGit) {
-    capGit.textContent = gitAccess ? 'On' : 'Off';
-    capGit.className = 'cap-val' + (gitAccess ? ' cap-on' : '');
+// ── Capability badges ─────────────────────────────────────────────────
+function setBadge(id: string, on: boolean, label: string): void {
+  const e = opt<HTMLElement>(id);
+  if (!e) return;
+  e.textContent = label;
+  e.className   = 'cd-badge' + (on ? ' on' : '');
+}
+
+function syncCaps(fileAccess: string, terminal: boolean, git: boolean): void {
+  const hasFile = fileAccess !== 'none';
+  const rw = fileAccess === 'readwrite';
+  setBadge('capFile', hasFile, rw ? 'R+W' : hasFile ? 'Read' : 'Off');
+  setBadge('capEdit', rw, rw ? 'On' : 'Off');
+  setBadge('capTerm', terminal, terminal ? 'On' : 'Off');
+  setBadge('capGit',  git,      git      ? 'On' : 'Off');
+  setBadge('capCtx',  true, 'On');
+}
+
+// ── Sessions / tabs ───────────────────────────────────────────────────
+function renderTabs(): void {
+  tabsBar.innerHTML = '';
+  for (const t of tabs) {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = `cd-tab${t.id === activeSession ? ' active' : ''}`;
+    tab.addEventListener('click', () => vscode.postMessage({ type: 'switchSession', id: t.id }));
+
+    const lbl = document.createElement('span');
+    lbl.className = 'cd-tab-label';
+    lbl.textContent = t.title;
+    tab.appendChild(lbl);
+
+    const cls = document.createElement('span');
+    cls.className = 'cd-tab-close';
+    cls.textContent = '×';
+    cls.title = 'Close';
+    cls.addEventListener('click', (e) => {
+      e.stopPropagation();
+      vscode.postMessage({ type: 'closeSession', id: t.id });
+    });
+    tab.appendChild(cls);
+
+    tabsBar.appendChild(tab);
   }
 }
 
-function setMode(next: ChatMode): void {
-  mode = next;
-  syncModeUi();
+// ── History ───────────────────────────────────────────────────────────
+function histVisible(item: HistItem): boolean {
+  const q = histSearch.value.trim().toLowerCase();
+  if (q && !`${item.title} ${item.preview}`.toLowerCase().includes(q)) return false;
+  const age = Date.now() - item.updatedAt;
+  if (histRange === 'today') return age <= 86400000;
+  if (histRange === 'week')  return age <= 604800000;
+  if (histRange === 'month') return age <= 2592000000;
+  return true;
 }
 
-function renderAttachmentRow(): void {
-  attachmentRow.innerHTML = '';
-  if (!attachments.length) {
-    attachmentRow.classList.add('hidden');
+function renderHist(): void {
+  histList.innerHTML = '';
+  const visible = histItems.filter(histVisible);
+  if (!visible.length) {
+    const e = document.createElement('div');
+    e.className = 'cd-hist-empty';
+    e.textContent = 'No matching sessions.';
+    histList.appendChild(e);
     return;
   }
-  attachmentRow.classList.remove('hidden');
-  attachments.forEach((item) => {
-    const chip = document.createElement('div');
-    chip.className = 'attach-chip';
-    const label = document.createElement('span');
-    label.textContent = item.label;
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.setAttribute('aria-label', 'Remove attachment');
-    remove.textContent = '×';
-    remove.addEventListener('click', () => {
-      vscode.postMessage({ type: 'removeAttachment', id: item.id });
+  for (const item of visible) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = `cd-hist-item${item.id === activeSession ? ' active' : ''}`;
+    row.addEventListener('click', () => {
+      vscode.postMessage({ type: item.archived ? 'restoreSession' : 'switchSession', id: item.id });
+      closeHistory();
     });
-    chip.appendChild(label);
-    chip.appendChild(remove);
-    attachmentRow.appendChild(chip);
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'cd-hist-title';
+    titleEl.textContent = item.title;
+
+    const metaEl = document.createElement('div');
+    metaEl.className = 'cd-hist-meta';
+    const date = new Intl.DateTimeFormat(undefined, { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }).format(new Date(item.updatedAt));
+    metaEl.textContent = `${date} · ${item.messageCount} msg${item.messageCount === 1 ? '' : 's'}`;
+    if (item.archived) {
+      const arc = document.createElement('span');
+      arc.className = 'cd-hist-archived';
+      arc.textContent = 'archived';
+      metaEl.appendChild(arc);
+    }
+
+    const previewEl = document.createElement('div');
+    previewEl.className = 'cd-hist-preview';
+    previewEl.textContent = item.preview || 'Empty conversation';
+
+    row.appendChild(titleEl);
+    row.appendChild(metaEl);
+    row.appendChild(previewEl);
+    histList.appendChild(row);
+  }
+}
+
+// ── Attachments ───────────────────────────────────────────────────────
+function renderChips(): void {
+  chipsEl.innerHTML = '';
+  for (const a of attachments) {
+    const chip = document.createElement('div');
+    chip.className = 'cd-chip';
+    const lbl = document.createElement('span');
+    lbl.className = 'cd-chip-label';
+    lbl.textContent = a.label;
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'cd-chip-rm';
+    rm.setAttribute('aria-label', 'Remove');
+    rm.textContent = '×';
+    rm.addEventListener('click', () => vscode.postMessage({ type: 'removeAttachment', id: a.id }));
+    chip.appendChild(lbl);
+    chip.appendChild(rm);
+    chipsEl.appendChild(chip);
+  }
+}
+
+// ── Overlays ──────────────────────────────────────────────────────────
+function showMain(): void {
+  mainView.classList.remove('hidden');
+  settingsOverlay.classList.add('hidden');
+  historyOverlay.classList.add('hidden');
+}
+function showSettings(): void {
+  mainView.classList.add('hidden');
+  historyOverlay.classList.add('hidden');
+  settingsOverlay.classList.remove('hidden');
+}
+function showHistory(): void {
+  mainView.classList.add('hidden');
+  settingsOverlay.classList.add('hidden');
+  historyOverlay.classList.remove('hidden');
+  histSearch.focus();
+}
+function openSettings(): void {
+  vscode.postMessage({ type: 'getSettings' });
+}
+function closeSettings(): void {
+  showMain();
+}
+function openHistory(): void {
+  vscode.postMessage({ type: 'getHistory' });
+  showHistory();
+}
+function closeHistory(): void {
+  showMain();
+}
+
+// ── Message creation ──────────────────────────────────────────────────
+const SPINNER = `<div class="cd-spinner"><div class="cd-spinner-ring"></div><span>Thinking…</span></div>`;
+
+function stripThink(text: string): { visible: string; thinking: string } {
+  // Strip <steps> planning blocks (rendered in progress panel instead)
+  text = text.replace(/<steps>[\s\S]*?<\/steps>\s*/g, '');
+  let thinking = '';
+  let visible = text.replace(/<think>([\s\S]*?)<\/think>/g, (_, inner: string) => {
+    thinking += (thinking ? '\n\n' : '') + (inner as string).trim();
+    return '';
+  }).trim();
+  // Heading-based reasoning (some models)
+  const m = /^### Reasoning\s+([\s\S]*?)\s+### Answer\s+([\s\S]*)$/m.exec(visible);
+  if (m) { thinking += (thinking ? '\n\n' : '') + m[1].trim(); visible = m[2].trim(); }
+  // Unclosed <think> while streaming
+  const idx = visible.lastIndexOf('<think>');
+  if (idx !== -1) {
+    const tail = visible.slice(idx + 7).trim();
+    if (tail) thinking += (thinking ? '\n\n' : '') + tail;
+    visible = visible.slice(0, idx).trim();
+  }
+  return { visible, thinking };
+}
+
+function addCodeActions(root: HTMLElement): void {
+  root.querySelectorAll('pre').forEach((pre) => {
+    if (pre.querySelector('.cd-code-acts')) return;
+    const acts = document.createElement('div');
+    acts.className = 'cd-code-acts';
+
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'cd-code-btn';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', () => {
+      void navigator.clipboard.writeText(pre.querySelector('code')?.textContent ?? '');
+      copy.textContent = 'Copied!';
+      setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
+    });
+    acts.appendChild(copy);
+
+    const codeEl = pre.querySelector('code');
+    const lang = (/language-(\w+)/.exec(codeEl?.className ?? '') ?? [])[1] ?? '';
+    const rawCode = codeEl?.textContent ?? '';
+    const firstLine = rawCode.split('\n')[0].trim();
+    const filePath = (/(?:\/\/|#|<!--)\s*[Ff]ile:\s*(.+?)(?:\s*-->)?$/.exec(firstLine) ?? [])[1]?.trim();
+
+    const isShell = /^(bash|sh|shell|zsh|fish|powershell|ps1|cmd)$/i.test(lang);
+    const isOutput = /^(text|output|log|plain)$/i.test(lang);
+
+    if (!isOutput) {
+      const apply = document.createElement('button');
+      apply.type = 'button';
+      apply.className = 'cd-code-btn apply';
+      apply.textContent = filePath ? `Apply → ${filePath.split('/').pop() ?? filePath}` : 'Apply to File';
+      apply.title = filePath ? `Apply to ${filePath}` : 'Apply this block to a workspace file';
+      apply.addEventListener('click', () => vscode.postMessage({ type: 'applyFile', code: rawCode, language: lang, suggestedPath: filePath }));
+      acts.appendChild(apply);
+    }
+
+    if (isShell) {
+      const run = document.createElement('button');
+      run.type = 'button';
+      run.className = 'cd-code-btn run';
+      run.textContent = '▶ Run';
+      run.title = 'Run in integrated terminal';
+      run.addEventListener('click', () => vscode.postMessage({ type: 'runInTerminal', command: rawCode.trim() }));
+      acts.appendChild(run);
+    }
+
+    pre.appendChild(acts);
   });
 }
 
-function createMessage(
-  role: 'user' | 'assistant',
-  plainText: string,
-  isError = false
-): { wrapper: HTMLElement; bubble: HTMLElement } {
+function injectThinking(thinking: string, wrapper: HTMLElement, beforeEl: HTMLElement): void {
+  const block = document.createElement('div');
+  block.className = 'cd-think';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'cd-think-btn';
+  btn.innerHTML = `<span class="cd-think-arrow">▶</span> Reasoning`;
+  const body = document.createElement('div');
+  body.className = 'cd-think-body';
+  body.textContent = thinking;
+  btn.addEventListener('click', () => {
+    const open = body.classList.toggle('open');
+    const arrow = btn.querySelector<HTMLElement>('.cd-think-arrow');
+    if (arrow) arrow.textContent = open ? '▼' : '▶';
+  });
+  block.appendChild(btn);
+  block.appendChild(body);
+  wrapper.insertBefore(block, beforeEl);
+}
+
+function createMsg(role: 'user'|'assistant', text = '', isError = false): { wrapper: HTMLElement; bubble: HTMLElement } {
   const wrapper = document.createElement('div');
-  wrapper.className = `msg msg-${role}${isError ? ' error' : ''}`;
+  wrapper.className = `cd-msg ${role}${isError ? ' error' : ''}`;
 
   const roleEl = document.createElement('div');
-  roleEl.className = 'msg-role';
-  roleEl.textContent = role === 'user' ? 'You' : 'Assistant';
+  roleEl.className = 'cd-role';
+  roleEl.textContent = role === 'user' ? 'You' : 'Cascade';
 
   const bubble = document.createElement('div');
-  bubble.className = 'bubble bubble-plain';
-  bubble.textContent = plainText;
+  bubble.className = 'cd-bubble';
+  if (text) bubble.textContent = text;
 
   wrapper.appendChild(roleEl);
   wrapper.appendChild(bubble);
-  messagesEl.appendChild(wrapper);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-  updateEmptyState();
-
+  msgsEl.appendChild(wrapper);
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+  syncEmpty();
   return { wrapper, bubble };
 }
 
-function submitPrompt(): void {
-  const value = promptEl.value.trim();
-  if (!value || busy) {
-    return;
+function renderThread(msgs: { role: string; content: string }[]): void {
+  msgsEl.innerHTML = '';
+  pendingBubble = null;
+  pendingWrapper = null;
+
+  for (const m of msgs) {
+    if (m.role === 'user') {
+      createMsg('user', m.content);
+    } else if (m.role === 'assistant') {
+      const { visible, thinking } = stripThink(m.content);
+      const { wrapper, bubble } = createMsg('assistant');
+      if (thinking) injectThinking(thinking, wrapper, bubble);
+      bubble.className = 'cd-bubble md';
+      bubble.innerHTML = md(visible || m.content);
+      addCodeActions(bubble);
+    }
   }
-
-  createMessage('user', value);
-  vscode.postMessage({
-    type: 'send',
-    text: value,
-    mode,
-  });
-  promptEl.value = '';
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+  syncEmpty();
 }
 
-function closeMenus(): void {
-  attachMenu.classList.remove('show');
-}
-
+// ── Attach menu ───────────────────────────────────────────────────────
+function closeMenus(): void { attachMenu.classList.remove('open'); }
 function toggleAttachMenu(): void {
-  const show = !attachMenu.classList.contains('show');
+  const willOpen = !attachMenu.classList.contains('open');
   closeMenus();
-  if (show) {
-    attachMenu.classList.add('show');
+  if (willOpen) {
+    attachMenu.classList.add('open');
     attachSearch.value = '';
     attachSearch.focus();
+    filterMenu();
   }
 }
-
-function filterAttachMenu(): void {
+function filterMenu(): void {
   const q = attachSearch.value.trim().toLowerCase();
-  attachMenu.querySelectorAll<HTMLButtonElement>('.menu-item[data-filter]').forEach((btn) => {
-    const t = (btn.dataset.filter ?? '').toLowerCase();
-    btn.style.display = !q || t.includes(q) ? '' : 'none';
+  attachMenu.querySelectorAll<HTMLButtonElement>('.cd-menu-item[data-filter]').forEach(btn => {
+    btn.style.display = !q || (btn.dataset.filter ?? '').toLowerCase().includes(q) ? '' : 'none';
   });
 }
 
-sendBtn.addEventListener('click', () => {
-  submitPrompt();
-});
-
-newChatBtn.addEventListener('click', () => {
-  vscode.postMessage({ type: 'newSession' });
-});
-
-historyBtn.addEventListener('click', () => {
-  if (!historyOverlay.classList.contains('hidden')) {
-    closeHistoryPanel();
-    return;
-  }
-  openHistoryPanel();
-});
-
-helpBtn.addEventListener('click', () => {
-  vscode.postMessage({ type: 'showWelcome' });
-});
-
-settingsBtn.addEventListener('click', () => {
-  if (!settingsOverlay.classList.contains('hidden')) {
-    closeSettingsPanel();
-    return;
-  }
-  openSettingsPanel();
-});
-
-settingsCloseBtn.addEventListener('click', () => {
-  closeSettingsPanel();
-});
-
-settingsCancelBtn.addEventListener('click', () => {
-  closeSettingsPanel();
-});
-
-settingsOverlay.addEventListener('click', (event) => {
-  if (event.target === settingsOverlay) {
-    closeSettingsPanel();
-  }
-});
-
-historyCloseBtn.addEventListener('click', () => {
-  closeHistoryPanel();
-});
-
-historyOverlay.addEventListener('click', (event) => {
-  if (event.target === historyOverlay) {
-    closeHistoryPanel();
-  }
-});
-
-historySearch.addEventListener('input', () => {
-  renderHistoryList();
-});
-
-document.querySelectorAll<HTMLButtonElement>('.history-filter').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    historyRange = (btn.dataset.range as 'all' | 'today' | 'week' | 'month') ?? 'all';
-    document.querySelectorAll('.history-filter').forEach((candidate) => {
-      candidate.classList.toggle('active', candidate === btn);
-    });
-    renderHistoryList();
-  });
-});
-
-selectFileAccess.addEventListener('change', () => {
-  updateCapabilityBadges(selectFileAccess.value, chkTerminalAccess.checked, chkGitAccess.checked);
-});
-
-chkTerminalAccess.addEventListener('change', () => {
-  updateCapabilityBadges(selectFileAccess.value, chkTerminalAccess.checked, chkGitAccess.checked);
-});
-
-chkGitAccess.addEventListener('change', () => {
-  updateCapabilityBadges(selectFileAccess.value, chkTerminalAccess.checked, chkGitAccess.checked);
-});
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function validateSettingsInputs(): boolean {
-  let valid = true;
-  const tempVal = Number(inputTemperature.value);
-  if (!Number.isFinite(tempVal) || tempVal < 0 || tempVal > 2) {
-    inputTemperature.classList.add('invalid');
-    valid = false;
-  } else {
-    inputTemperature.classList.remove('invalid');
-  }
-  const topPVal = Number(inputTopP.value);
-  if (!Number.isFinite(topPVal) || topPVal < 0.01 || topPVal > 1) {
-    inputTopP.classList.add('invalid');
-    valid = false;
-  } else {
-    inputTopP.classList.remove('invalid');
-  }
-  const maxTokVal = Number(inputMaxTokens.value);
-  if (!Number.isFinite(maxTokVal) || maxTokVal < 1 || maxTokVal > 128000) {
-    inputMaxTokens.classList.add('invalid');
-    valid = false;
-  } else {
-    inputMaxTokens.classList.remove('invalid');
-  }
-  return valid;
+// ── Settings validation ───────────────────────────────────────────────
+function validateSettings(): boolean {
+  let ok = true;
+  const t = Number(inpTemp.value);
+  inpTemp.classList.toggle('err', !Number.isFinite(t) || t < 0 || t > 2);
+  if (!Number.isFinite(t) || t < 0 || t > 2) ok = false;
+  const p = Number(inpTopP.value);
+  inpTopP.classList.toggle('err', !Number.isFinite(p) || p < 0.01 || p > 1);
+  if (!Number.isFinite(p) || p < 0.01 || p > 1) ok = false;
+  const mk = Number(inpMaxTok.value);
+  inpMaxTok.classList.toggle('err', !Number.isFinite(mk) || mk < 256 || mk > 128000);
+  if (!Number.isFinite(mk) || mk < 256 || mk > 128000) ok = false;
+  return ok;
 }
 
 let toastTimer: number | undefined;
-
-function showSavedToast(): void {
-  settingsSavedToast.classList.add('visible');
-  if (toastTimer !== undefined) {
-    window.clearTimeout(toastTimer);
-  }
-  toastTimer = window.setTimeout(() => {
-    settingsSavedToast.classList.remove('visible');
-    toastTimer = undefined;
-  }, 1800);
+function showToast(): void {
+  settingsToast.classList.add('show');
+  if (toastTimer !== undefined) clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => { settingsToast.classList.remove('show'); }, 1800);
 }
 
-function togglePasswordVisibility(input: HTMLInputElement, btn: HTMLButtonElement): void {
-  const isHidden = input.type === 'password';
-  input.type = isHidden ? 'text' : 'password';
-  btn.textContent = isHidden ? '🙈' : '👁';
+function togglePw(inp: HTMLInputElement, btn: HTMLButtonElement): void {
+  const show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  btn.textContent = show ? '🙈' : '👁';
 }
 
-toggleOrKey.addEventListener('click', () => {
-  togglePasswordVisibility(inputOpenRouterKey, toggleOrKey);
-});
-
-toggleHfKey.addEventListener('click', () => {
-  togglePasswordVisibility(inputHfKey, toggleHfKey);
-});
-
-logoutBtn.addEventListener('click', () => {
-  vscode.postMessage({ type: 'logout' });
-});
-
-settingsSaveBtn.addEventListener('click', () => {
-  if (!validateSettingsInputs()) {
-    return;
+// ── Model select ──────────────────────────────────────────────────────
+function setModels(models: string[], selected: string): void {
+  ignoreModelChange = true;
+  modelSel.innerHTML = '';
+  if (!models.length) models = [selected];
+  for (const m of models) {
+    const opt = document.createElement('option');
+    opt.value = m; opt.textContent = m;
+    opt.selected = m === selected;
+    modelSel.appendChild(opt);
   }
-  const temperature = clamp(Number(inputTemperature.value), 0, 2);
-  const maxTokens = clamp(Math.round(Number(inputMaxTokens.value)), 1, 128000);
-  const topP = clamp(Number(inputTopP.value), 0.01, 1);
-  vscode.postMessage({
-    type: 'saveSettings',
-    openRouterKey: inputOpenRouterKey.value.trim() || undefined,
-    huggingfaceKey: inputHfKey.value.trim() || undefined,
-    temperature: Number.isFinite(temperature) ? temperature : undefined,
-    maxTokens: Number.isFinite(maxTokens) ? maxTokens : undefined,
-    topP: Number.isFinite(topP) ? topP : undefined,
-    openRouterFreeOnly: chkOpenRouterFreeOnly.checked,
-    fileAccess: selectFileAccess.value,
-    fileScope: selectFileScope.value,
-    approvalMode: selectApprovalMode.value,
-    terminalAccess: chkTerminalAccess.checked,
-    gitAccess: chkGitAccess.checked,
-  });
-  showSavedToast();
-  window.setTimeout(() => {
-    closeSettingsPanel();
-  }, 900);
-});
+  if (models.includes(selected)) modelSel.value = selected;
+  ignoreModelChange = false;
+}
 
-refreshModelsBtn.addEventListener('click', () => {
-  vscode.postMessage({ type: 'getModels' });
-});
+// ── Send ──────────────────────────────────────────────────────────────
+function send(): void {
+  const text = promptEl.value.trim();
+  if (!text || busy) return;
+  createMsg('user', text);
+  vscode.postMessage({ type: 'send', text, mode });
+  promptEl.value = '';
+}
 
-providerSelect.addEventListener('change', () => {
-  vscode.postMessage({
-    type: 'setProvider',
-    provider: providerSelect.value,
-  });
-});
-
-modelSelect.addEventListener('change', () => {
-  if (ignoreModelSelectChange) {
-    return;
-  }
-  vscode.postMessage({
-    type: 'setModel',
-    model: modelSelect.value,
-  });
-});
-
-promptEl.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault();
-    submitPrompt();
-  }
-});
-
-document.addEventListener('keydown', (event) => {
-  if (event.key !== 'Escape') {
-    return;
-  }
-
-  if (!settingsOverlay.classList.contains('hidden')) {
-    closeSettingsPanel();
-  }
-
-  if (!historyOverlay.classList.contains('hidden')) {
-    closeHistoryPanel();
-  }
-});
-
-attachBtn.addEventListener('click', (event) => {
-  event.stopPropagation();
-  toggleAttachMenu();
-});
-
-browseBtn?.addEventListener('click', () => {
-  vscode.postMessage({ type: 'openBrowser' });
-});
-
-// Drag & drop files onto chat area
-messagesEl.addEventListener('dragover', (event) => {
-  event.preventDefault();
-  messagesEl.classList.add('drag-over');
-});
-messagesEl.addEventListener('dragleave', () => {
-  messagesEl.classList.remove('drag-over');
-});
-messagesEl.addEventListener('drop', (event) => {
-  event.preventDefault();
-  messagesEl.classList.remove('drag-over');
-  const file = event.dataTransfer?.files?.[0];
-  if (file) {
-    vscode.postMessage({ type: 'pickLocalFile' });
-  }
-});
-
-document.addEventListener('click', () => {
-  closeMenus();
-});
-
-attachMenu.addEventListener('click', (event) => {
-  event.stopPropagation();
-});
-
-attachSearch.addEventListener('input', () => {
-  filterAttachMenu();
-});
-
-attachMenu.querySelectorAll<HTMLButtonElement>('.menu-item[data-action]').forEach((btn) => {
+// ── Settings nav switching ────────────────────────────────────────────
+document.querySelectorAll<HTMLButtonElement>('.cd-nav-item[data-page]').forEach(btn => {
   btn.addEventListener('click', () => {
-    const action = btn.dataset.action;
-    closeMenus();
-    if (action === 'activeFile') {
-      vscode.postMessage({ type: 'attachActiveFile' });
-    } else if (action === 'openEditors') {
-      vscode.postMessage({ type: 'pickOpenEditor' });
-    } else if (action === 'workspaceFile') {
-      vscode.postMessage({ type: 'pickWorkspaceFile' });
-    } else if (action === 'problems') {
-      vscode.postMessage({ type: 'attachProblems' });
-    } else if (action === 'clipboardImage') {
-      vscode.postMessage({ type: 'attachClipboardImage' });
-    } else if (action === 'localFile') {
-      vscode.postMessage({ type: 'pickLocalFile' });
-    } else if (action === 'instructions') {
-      vscode.postMessage({ type: 'stub', feature: 'instructions' });
-    } else if (action === 'symbols') {
-      vscode.postMessage({ type: 'stub', feature: 'symbols' });
-    }
+    const page = btn.dataset.page ?? '';
+    // Update nav active state
+    document.querySelectorAll('.cd-nav-item').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    // Show correct page
+    document.querySelectorAll('.cd-settings-page').forEach(p => p.classList.remove('active'));
+    const pageEl = document.getElementById('page' + page.charAt(0).toUpperCase() + page.slice(1));
+    if (pageEl) pageEl.classList.add('active');
   });
 });
 
-modeAgent.addEventListener('click', () => {
-  setMode('agent');
+// ── Wire up events ────────────────────────────────────────────────────
+sendBtn.addEventListener('click', send);
+newChatBtn.addEventListener('click', () => vscode.postMessage({ type: 'newSession' }));
+refreshBtn.addEventListener('click', () => vscode.postMessage({ type: 'getModels' }));
+
+settingsBtn.addEventListener('click', () => {
+  if (!settingsOverlay.classList.contains('hidden')) { closeSettings(); return; }
+  openSettings();
 });
-modeAsk.addEventListener('click', () => {
-  setMode('ask');
-});
-modePlan.addEventListener('click', () => {
-  setMode('plan');
+historyBtn.addEventListener('click', () => {
+  if (!historyOverlay.classList.contains('hidden')) { closeHistory(); return; }
+  openHistory();
 });
 
-window.addEventListener('message', (event) => {
-  const message = event.data as Record<string, unknown>;
+settingsClose.addEventListener('click', closeSettings);
+settingsCancel.addEventListener('click', closeSettings);
 
-  if (message?.type === 'status') {
-    setStatus(String(message.status ?? ''));
-    return;
-  }
+settingsSave.addEventListener('click', () => {
+  if (!validateSettings()) return;
+  vscode.postMessage({
+    type:            'saveSettings',
+    openRouterKey:   inpOrKey.value.trim()   || undefined,
+    huggingfaceKey:  inpHfKey.value.trim()   || undefined,
+    groqKey:         inpGroqKey.value.trim() || undefined,
+    temperature:     Number(inpTemp.value),
+    maxTokens:       Math.round(Number(inpMaxTok.value)),
+    topP:            Number(inpTopP.value),
+    contextLength:   inpCtxLen ? Math.round(Number(inpCtxLen.value)) : 20,
+    fileAccess:      selFileAccess.value,
+    fileScope:       selFileScope.value,
+    approvalMode:    selApproval.value,
+    terminalAccess:  chkTerminal.checked,
+    gitAccess:       chkGit.checked,
+    openRouterFreeOnly: chkFreeOnly.checked,
+    fallbackProvider: selFallback ? selFallback.value : 'none',
+    userName:        inpUserName    ? inpUserName.value.trim()    : '',
+    systemPrompt:    inpSystemPrompt ? inpSystemPrompt.value.trim() : '',
+    historyRetention: selHistory ? selHistory.value : 'unlimited',
+  });
+  showToast();
+  setTimeout(closeSettings, 900);
+});
 
-  if (message?.type === 'sessionState') {
-    activeSessionId = String(message.activeSessionId ?? '');
-    const raw = message.sessions;
-    sessions = Array.isArray(raw)
-      ? raw.map((item) => {
-          const o = item as Record<string, unknown>;
-          return {
-            id: String(o.id ?? ''),
-            title: String(o.title ?? 'Chat'),
-          };
-        })
-      : [];
-    renderSessionBar();
-    renderHistoryList();
-    return;
-  }
+logoutBtn.addEventListener('click', () => vscode.postMessage({ type: 'logout' }));
+clearHistBtn?.addEventListener('click', () => {
+  vscode.postMessage({ type: 'clearAllHistory' });
+  closeSettings();
+});
 
-  if (message?.type === 'historyState') {
-    activeSessionId = String(message.activeSessionId ?? activeSessionId);
-    const raw = message.items;
-    historyItems = Array.isArray(raw)
-      ? raw.map((item) => {
-          const o = item as Record<string, unknown>;
-          return {
-            id: String(o.id ?? ''),
-            title: String(o.title ?? 'Chat'),
-            preview: String(o.preview ?? ''),
-            updatedAt: Number(o.updatedAt ?? 0),
-            archived: Boolean(o.archived),
-            messageCount: Number(o.messageCount ?? 0),
-          };
-        })
-      : [];
-    renderHistoryList();
-    return;
-  }
+eyeOr.addEventListener('click',   () => togglePw(inpOrKey,  eyeOr));
+eyeHf.addEventListener('click',   () => togglePw(inpHfKey,  eyeHf));
+eyeGroq.addEventListener('click', () => togglePw(inpGroqKey, eyeGroq));
 
-  if (message?.type === 'providerChanged') {
-    const p = String(message.provider ?? 'ollama');
-    if (providerSelect.value !== p) {
-      providerSelect.value = p;
+selFileAccess.addEventListener('change', () => syncCaps(selFileAccess.value, chkTerminal.checked, chkGit.checked));
+chkTerminal.addEventListener('change',   () => syncCaps(selFileAccess.value, chkTerminal.checked, chkGit.checked));
+chkGit.addEventListener('change',        () => syncCaps(selFileAccess.value, chkTerminal.checked, chkGit.checked));
+
+historyClose.addEventListener('click', closeHistory);
+histSearch.addEventListener('input', renderHist);
+
+document.querySelectorAll<HTMLButtonElement>('.cd-hist-filter').forEach(btn => {
+  btn.addEventListener('click', () => {
+    histRange = (btn.dataset.range as typeof histRange) ?? 'all';
+    document.querySelectorAll('.cd-hist-filter').forEach(b => b.classList.toggle('active', b === btn));
+    renderHist();
+  });
+});
+
+modeAgent.addEventListener('click', () => { mode = 'agent'; syncMode(); });
+modeAsk.addEventListener('click',   () => { mode = 'ask';   syncMode(); });
+modePlan.addEventListener('click',  () => { mode = 'plan';  syncMode(); });
+
+providerSel.addEventListener('change', () => {
+  vscode.postMessage({ type: 'setProvider', provider: providerSel.value });
+});
+modelSel.addEventListener('change', () => {
+  if (ignoreModelChange) return;
+  vscode.postMessage({ type: 'setModel', model: modelSel.value });
+});
+
+promptEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!settingsOverlay.classList.contains('hidden')) closeSettings();
+  if (!historyOverlay.classList.contains('hidden'))  closeHistory();
+});
+
+attachBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleAttachMenu(); });
+browseBtn?.addEventListener('click', () => vscode.postMessage({ type: 'openBrowser' }));
+attachSearch.addEventListener('input', filterMenu);
+document.addEventListener('click', closeMenus);
+attachMenu.addEventListener('click', (e) => e.stopPropagation());
+
+attachMenu.querySelectorAll<HTMLButtonElement>('.cd-menu-item[data-action]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    closeMenus();
+    const a = btn.dataset.action;
+    if (a === 'activeFile')   vscode.postMessage({ type: 'attachActiveFile' });
+    if (a === 'openEditors')  vscode.postMessage({ type: 'pickOpenEditor' });
+    if (a === 'workspaceFile') vscode.postMessage({ type: 'pickWorkspaceFile' });
+    if (a === 'localFile')    vscode.postMessage({ type: 'pickLocalFile' });
+    if (a === 'problems')     vscode.postMessage({ type: 'attachProblems' });
+    if (a === 'clipboard')    vscode.postMessage({ type: 'attachClipboardImage' });
+  });
+});
+
+msgsEl.addEventListener('dragover',  (e) => { e.preventDefault(); msgsEl.classList.add('drag-over'); });
+msgsEl.addEventListener('dragleave', ()  => msgsEl.classList.remove('drag-over'));
+msgsEl.addEventListener('drop',      (e) => { e.preventDefault(); msgsEl.classList.remove('drag-over'); if (e.dataTransfer?.files.length) vscode.postMessage({ type: 'pickLocalFile' }); });
+
+// ── Message handler ───────────────────────────────────────────────────
+window.addEventListener('message', ({ data }) => {
+  const msg = data as Record<string, unknown>;
+  switch (msg.type as string) {
+
+    case 'status':
+      setStatus(String(msg.text ?? 'Ready'), (msg.state as 'idle'|'busy'|'error') ?? 'idle');
+      break;
+
+    case 'sessionState': {
+      activeSession = String(msg.activeSessionId ?? '');
+      tabs = (Array.isArray(msg.sessions) ? msg.sessions as { id:string; title:string }[] : [])
+        .map(s => ({ id: s.id, title: s.title }));
+      renderTabs();
+      break;
     }
-    return;
-  }
 
-  if (message?.type === 'settingsForm') {
-    applySettingsForm(message);
-    return;
-  }
-
-  if (message?.type === 'loadThread') {
-    const raw = message.messages;
-    const msgs: ThreadMessage[] = Array.isArray(raw)
-      ? raw.map((item) => {
-          const o = item as Record<string, unknown>;
-          return {
-            role: String(o.role ?? 'user'),
-            content: String(o.content ?? ''),
-          };
-        })
-      : [];
-    renderThread(msgs);
-    promptEl.focus();
-    return;
-  }
-
-  if (message?.type === 'assistantStart') {
-    setBusy(true);
-    if (pendingAssistantWrapper) {
-      pendingAssistantWrapper.remove();
-      pendingAssistantBubble = null;
-      pendingAssistantWrapper = null;
+    case 'historyState': {
+      activeSession = String(msg.activeSessionId ?? activeSession);
+      histItems = Array.isArray(msg.items)
+        ? (msg.items as Record<string,unknown>[]).map(i => ({
+            id:           String(i.id ?? ''),
+            title:        String(i.title ?? ''),
+            preview:      String(i.preview ?? ''),
+            updatedAt:    Number(i.updatedAt ?? 0),
+            archived:     Boolean(i.archived),
+            messageCount: Number(i.messageCount ?? 0),
+          }))
+        : [];
+      renderHist();
+      break;
     }
-    const { wrapper, bubble } = createMessage('assistant', '');
-    bubble.className = 'bubble bubble-thinking';
-    bubble.innerHTML = SPINNER_HTML;
-    pendingAssistantBubble = bubble;
-    pendingAssistantWrapper = wrapper;
-    return;
-  }
 
-  if (message?.type === 'assistantAbort') {
-    setBusy(false);
-    if (pendingAssistantBubble && pendingAssistantWrapper) {
-      pendingAssistantBubble.textContent = 'Stopped.';
-      pendingAssistantWrapper.classList.remove('error');
-      pendingAssistantBubble = null;
-      pendingAssistantWrapper = null;
-    }
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    return;
-  }
-
-  if (message?.type === 'assistantDelta') {
-    if (pendingAssistantBubble) {
-      const raw = String(message.text ?? '');
-      const { visible } = stripThinkingBlocks(raw);
-      if (visible) {
-        pendingAssistantBubble.className = 'bubble md';
-        pendingAssistantBubble.innerHTML = renderMarkdown(visible);
-      } else {
-        // Still in thinking phase — keep spinner
-        pendingAssistantBubble.className = 'bubble bubble-thinking';
-        pendingAssistantBubble.innerHTML = SPINNER_HTML;
-      }
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-    }
-    return;
-  }
-
-  if (message?.type === 'assistantDone') {
-    setBusy(false);
-    const text = String(message.text ?? '');
-    const { visible, thinking } = stripThinkingBlocks(text);
-
-    const finalize = (bubble: HTMLElement, wrapper: HTMLElement): void => {
-      // Inject thinking toggle above the main answer if there was reasoning
-      if (thinking) {
-        const thinkingBlock = document.createElement('div');
-        thinkingBlock.className = 'thinking-block';
-
-        const toggleBtn = document.createElement('button');
-        toggleBtn.type = 'button';
-        toggleBtn.className = 'thinking-toggle-btn';
-        toggleBtn.innerHTML = `<span class="thinking-toggle-arrow">▶</span> Reasoning`;
-        thinkingBlock.appendChild(toggleBtn);
-
-        const thinkingContent = document.createElement('div');
-        thinkingContent.className = 'thinking-content';
-        thinkingContent.textContent = thinking;
-        thinkingBlock.appendChild(thinkingContent);
-
-        toggleBtn.addEventListener('click', () => {
-          const isOpen = thinkingContent.classList.toggle('visible');
-          const arrow = toggleBtn.querySelector<HTMLElement>('.thinking-toggle-arrow');
-          if (arrow) {
-            arrow.textContent = isOpen ? '▼' : '▶';
-          }
-        });
-
-        wrapper.insertBefore(thinkingBlock, bubble);
-      }
-
-      bubble.className = 'bubble md';
-      bubble.innerHTML = renderMarkdown(visible || '*(no response)*');
-      enhanceCodeBlocks(bubble);
-    };
-
-    if (pendingAssistantBubble && pendingAssistantWrapper) {
-      finalize(pendingAssistantBubble, pendingAssistantWrapper);
-      pendingAssistantBubble = null;
-      pendingAssistantWrapper = null;
-    } else {
-      const { bubble, wrapper } = createMessage('assistant', '');
-      finalize(bubble, wrapper);
-    }
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    promptEl.focus();
-    return;
-  }
-
-  if (message?.type === 'assistantError') {
-    setBusy(false);
-    const text = String(message.text ?? '');
-    if (pendingAssistantBubble && pendingAssistantWrapper) {
-      pendingAssistantBubble.textContent = text;
-      pendingAssistantBubble.className = 'bubble bubble-plain';
-      pendingAssistantWrapper.classList.add('error');
-      pendingAssistantBubble = null;
-      pendingAssistantWrapper = null;
-    } else {
-      createMessage('assistant', text, true);
-    }
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    promptEl.focus();
-    return;
-  }
-
-  if (message?.type === 'cleared') {
-    messagesEl.innerHTML = '';
-    pendingAssistantBubble = null;
-    pendingAssistantWrapper = null;
-    updateEmptyState();
-    return;
-  }
-
-  if (message?.type === 'models') {
-    setModels(message.models, message.selectedModel);
-    return;
-  }
-
-  if (message?.type === 'modelChanged') {
-    ignoreModelSelectChange = true;
-    modelSelect.value = String(message.model ?? '');
-    ignoreModelSelectChange = false;
-    return;
-  }
-
-  if (message?.type === 'attachmentsUpdated') {
-    const raw = message.items;
-    attachments = Array.isArray(raw)
-      ? raw.map((item) => {
-          const o = item as Record<string, unknown>;
-          return {
-            id: String(o.id ?? ''),
-            label: String(o.label ?? ''),
-          };
-        })
-      : [];
-    renderAttachmentRow();
-  }
-
-  if (message?.type === 'workspaceTree') {
-    const tree = String(message.tree ?? '');
-    const { bubble } = createMessage('assistant', '');
-    bubble.className = 'bubble md';
-    bubble.innerHTML = renderMarkdown('```\n' + tree + '\n```');
-    enhanceCodeBlocks(bubble);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    updateEmptyState();
-    return;
-  }
-
-  if (message?.type === 'gitResult') {
-    const output = String(message.output ?? '');
-    const op = String(message.op ?? '');
-    const { bubble } = createMessage('assistant', '');
-    bubble.className = 'bubble md';
-    bubble.innerHTML = renderMarkdown(`**Git ${op}**\n\`\`\`\n${output}\n\`\`\``);
-    enhanceCodeBlocks(bubble);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    updateEmptyState();
-    return;
-  }
-
-  if (message?.type === 'ollamaState') {
-    const state = String(message.state ?? '');
-    if (state === 'not-running') {
-      setStatus('Ollama not running');
-      statusPillEl.classList.add('error');
-    } else if (state === 'not-installed') {
-      setStatus('Ollama not installed');
-      statusPillEl.classList.add('error');
-    } else if (state === 'running') {
-      const ver = message.version ? ` v${String(message.version)}` : '';
-      setStatus(`Idle — Ollama${ver}`);
-      statusPillEl.classList.remove('error');
-    }
-    return;
-  }
-
-  if (message?.type === 'browserSelection') {
-    const text = String(message.text ?? '');
-    const url = String(message.url ?? '');
-    const tag = message.elementTag ? ` <${String(message.elementTag)}>` : '';
-    const { bubble } = createMessage('assistant', '');
-    bubble.className = 'bubble md';
-    bubble.innerHTML = renderMarkdown(
-      `**📎 Web selection from** \`${url}\`${tag}\n\n> ${text.replace(/\n/g, '\n> ')}`
-    );
-    enhanceCodeBlocks(bubble);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    updateEmptyState();
-    if (!promptEl.value) {
-      try {
-        const hostname = new URL(url).hostname;
-        promptEl.value = `About this from ${hostname}: `;
-      } catch {
-        promptEl.value = 'About this: ';
-      }
+    case 'loadThread': {
+      const msgs2 = Array.isArray(msg.messages)
+        ? (msg.messages as Record<string,unknown>[]).map(m => ({ role: String(m.role), content: String(m.content) }))
+        : [];
+      renderThread(msgs2);
       promptEl.focus();
-      promptEl.setSelectionRange(promptEl.value.length, promptEl.value.length);
+      break;
     }
-    return;
+
+    case 'models': {
+      const noKey = Boolean(msg.noKey);
+      if (noKey) {
+        ignoreModelChange = true;
+        modelSel.innerHTML = '<option value="">— Add API key in ⚙ Settings —</option>';
+        modelSel.disabled = true;
+        ignoreModelChange = false;
+      } else {
+        modelSel.disabled = false;
+        setModels(Array.isArray(msg.models) ? (msg.models as string[]) : [], String(msg.selectedModel ?? ''));
+      }
+      break;
+    }
+
+    case 'keyStatus': {
+      function updateHint(el2: HTMLElement, hasKey: boolean): void {
+        el2.className = `cd-key-status ${hasKey ? 'set' : 'unset'}`;
+        el2.innerHTML = `<span class="cd-key-dot"></span>${hasKey ? 'Connected' : 'Not set'}`;
+      }
+      updateHint(hintOr,   Boolean(msg.hasOrKey));
+      updateHint(hintHf,   Boolean(msg.hasHfKey));
+      updateHint(hintGroq, Boolean(msg.hasGroqKey));
+      break;
+    }
+
+    case 'progressSteps': {
+      const steps = Array.isArray(msg.steps) ? (msg.steps as string[]) : [];
+      if (steps.length) showProgressPanel(steps);
+      break;
+    }
+
+    case 'progressDone':
+      completeProgressPanel();
+      break;
+
+    case 'modelChanged':
+      ignoreModelChange = true;
+      modelSel.value = String(msg.model ?? '');
+      ignoreModelChange = false;
+      break;
+
+    case 'providerChanged':
+      if (providerSel.value !== String(msg.provider)) providerSel.value = String(msg.provider ?? '');
+      break;
+
+    case 'settingsForm': {
+      const m2 = msg as Record<string,unknown>;
+      // Key status cards
+      function setKeyHint(el2: HTMLElement, hasKey: boolean): void {
+        el2.className = `cd-key-status ${hasKey ? 'set' : 'unset'}`;
+        el2.innerHTML = `<span class="cd-key-dot"></span>${hasKey ? 'Connected' : 'Not set'}`;
+      }
+      setKeyHint(hintOr,   Boolean(m2.hasOrKey));
+      setKeyHint(hintHf,   Boolean(m2.hasHfKey));
+      setKeyHint(hintGroq, Boolean(m2.hasGroqKey));
+      // Reset key inputs
+      inpOrKey.value   = '';  inpOrKey.type   = 'password';  eyeOr.textContent   = '👁';
+      inpHfKey.value   = '';  inpHfKey.type   = 'password';  eyeHf.textContent   = '👁';
+      inpGroqKey.value = '';  inpGroqKey.type = 'password';  eyeGroq.textContent = '👁';
+      // Sampling
+      inpTemp.value    = String(m2.temperature ?? 0.2);
+      inpMaxTok.value  = String(m2.maxTokens   ?? 4096);
+      inpTopP.value    = String(m2.topP        ?? 1);
+      if (inpCtxLen)       inpCtxLen.value       = String(m2.contextLength ?? 20);
+      // Models
+      chkFreeOnly.checked = Boolean(m2.openRouterFreeOnly ?? true);
+      if (selFallback) selFallback.value = String(m2.fallbackProvider ?? 'none');
+      // Workspace
+      selApproval.value   = String(m2.approvalMode ?? 'ask');
+      selFileAccess.value = String(m2.fileAccess   ?? 'none');
+      selFileScope.value  = String(m2.fileScope    ?? 'workspace');
+      chkTerminal.checked = Boolean(m2.terminalAccess);
+      chkGit.checked      = Boolean(m2.gitAccess);
+      // Profile
+      if (inpUserName)     inpUserName.value     = String(m2.userName ?? '');
+      if (inpSystemPrompt) inpSystemPrompt.value = String(m2.systemPrompt ?? '');
+      // Privacy
+      if (selHistory) selHistory.value = String(m2.historyRetention ?? 'unlimited');
+      // Clear validation errors
+      inpTemp.classList.remove('err');
+      inpTopP.classList.remove('err');
+      inpMaxTok.classList.remove('err');
+      syncCaps(String(m2.fileAccess ?? 'none'), Boolean(m2.terminalAccess), Boolean(m2.gitAccess));
+      showSettings();
+      break;
+    }
+
+    case 'attachmentsUpdated':
+      attachments = Array.isArray(msg.items)
+        ? (msg.items as Record<string,unknown>[]).map(i => ({ id: String(i.id), label: String(i.label) }))
+        : [];
+      renderChips();
+      break;
+
+    case 'assistantStart':
+      setBusy(true);
+      pendingWrapper?.remove();
+      const { wrapper: w, bubble: b } = createMsg('assistant');
+      b.innerHTML = SPINNER;
+      pendingBubble  = b;
+      pendingWrapper = w;
+      break;
+
+    case 'assistantDelta':
+      if (pendingBubble) {
+        const raw = String(msg.text ?? '');
+        const { visible } = stripThink(raw);
+        if (visible) {
+          pendingBubble.className = 'cd-bubble md';
+          pendingBubble.innerHTML = md(visible);
+        } else {
+          pendingBubble.className = 'cd-bubble';
+          pendingBubble.innerHTML = SPINNER;
+        }
+        msgsEl.scrollTop = msgsEl.scrollHeight;
+      }
+      break;
+
+    case 'assistantDone': {
+      setBusy(false);
+      const text2 = String(msg.text ?? '');
+      const { visible: vis, thinking } = stripThink(text2);
+      const finalize = (bubble: HTMLElement, wrapper: HTMLElement) => {
+        if (thinking) injectThinking(thinking, wrapper, bubble);
+        bubble.className = 'cd-bubble md';
+        bubble.innerHTML = md(vis || '*(no response)*');
+        addCodeActions(bubble);
+      };
+      if (pendingBubble && pendingWrapper) {
+        finalize(pendingBubble, pendingWrapper);
+      } else {
+        const { bubble: bb, wrapper: ww } = createMsg('assistant');
+        finalize(bb, ww);
+      }
+      pendingBubble = null; pendingWrapper = null;
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+      promptEl.focus();
+      break;
+    }
+
+    case 'assistantError': {
+      setBusy(false);
+      const txt = String(msg.text ?? 'An error occurred.');
+      if (pendingBubble && pendingWrapper) {
+        pendingBubble.className = 'cd-bubble';
+        pendingBubble.textContent = txt;
+        pendingWrapper.classList.add('error');
+      } else {
+        createMsg('assistant', txt, true);
+      }
+      pendingBubble = null; pendingWrapper = null;
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+      break;
+    }
+
+    case 'assistantAbort':
+      setBusy(false);
+      completeProgressPanel();
+      if (pendingBubble) { pendingBubble.className = 'cd-bubble'; pendingBubble.textContent = 'Stopped.'; }
+      pendingBubble = null; pendingWrapper = null;
+      break;
+
+    case 'cleared':
+      msgsEl.innerHTML = '';
+      pendingBubble = null; pendingWrapper = null;
+      hideProgressPanel();
+      syncEmpty();
+      break;
+
+    case 'gitResult': {
+      const op  = String(msg.op ?? '');
+      const out = String(msg.output ?? '');
+      const { bubble: gb } = createMsg('assistant');
+      gb.className = 'cd-bubble md';
+      gb.innerHTML = md(`**Git ${op}**\n\`\`\`\n${out}\n\`\`\``);
+      addCodeActions(gb);
+      msgsEl.scrollTop = msgsEl.scrollHeight; syncEmpty();
+      break;
+    }
   }
 });
 
-syncModeUi();
-updateEmptyState();
+// ── Init ──────────────────────────────────────────────────────────────
+syncMode();
+syncEmpty();
 promptEl.focus();
-vscode.postMessage({ type: 'getModels' });
-vscode.postMessage({ type: 'getHistory' });
+vscode.postMessage({ type: 'ready' });

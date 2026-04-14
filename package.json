@@ -1,184 +1,105 @@
 {
-  "name": "ollamaunofficial",
-  "displayName": "OllamaUnofficial",
-  "description": "Sidebar chat: Ollama (local), OpenRouter, and Hugging Face Inference — free-model friendly with secure API keys.",
-  "version": "0.3.5",
-  "publisher": "Spiritbocs",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Spiritbocs/OllamaUnofficial.git"
-  },
-  "homepage": "https://github.com/Spiritbocs/OllamaUnofficial",
-  "bugs": {
-    "url": "https://github.com/Spiritbocs/OllamaUnofficial/issues"
-  },
+  "name": "cascade",
+  "displayName": "Cascade \u2014 Free AI Models",
+  "description": "AI coding assistant powered by free-tier models from OpenRouter, Hugging Face, and Groq. No paid plan required.",
+  "version": "1.0.0",
+  "publisher": "NolvusMadeIt",
+  "icon": "media/icon.svg",
   "engines": {
-    "vscode": "^1.115.0"
+    "vscode": "^1.80.0"
   },
   "categories": [
-    "Other",
+    "AI",
+    "Chat",
     "Programming Languages"
   ],
+  "keywords": [
+    "ai",
+    "chat",
+    "openrouter",
+    "huggingface",
+    "groq",
+    "free",
+    "llm",
+    "coding"
+  ],
   "activationEvents": [
-    "onView:ollamaCoderChat.sidebar",
-    "onView:ollamaCoderChat.progress",
-    "onCommand:ollamaCoderChat.focus",
-    "onCommand:ollamaCoderChat.newChat",
-    "onCommand:ollamaCoderChat.setOpenRouterApiKey",
-    "onCommand:ollamaCoderChat.setHuggingFaceApiToken",
-    "onCommand:ollamaCoderChat.showLog",
-    "onCommand:ollamaCoderChat.openBrowser",
-    "onCommand:ollamaCoderChat.showWelcome",
-    "onCommand:ollamaCoderChat.logout"
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "ollamaCoderChat",
-          "title": "Ollama Chat",
+          "id": "cascade-container",
+          "title": "Cascade AI",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "ollamaCoderChat": [
+      "cascade-container": [
         {
           "type": "webview",
-          "id": "ollamaCoderChat.sidebar",
-          "name": "Chat"
-        },
-        {
-          "type": "webview",
-          "id": "ollamaCoderChat.progress",
-          "name": "Progress"
+          "id": "cascade.chat",
+          "name": "Cascade"
         }
       ]
     },
     "commands": [
       {
-        "command": "ollamaCoderChat.focus",
-        "title": "OllamaUnofficial: Focus Chat"
+        "command": "cascade.newChat",
+        "title": "Cascade: New Chat"
       },
       {
-        "command": "ollamaCoderChat.newChat",
-        "title": "OllamaUnofficial: New Chat Tab",
-        "icon": "$(add)"
+        "command": "cascade.openSettings",
+        "title": "Cascade: Open Settings"
       },
       {
-        "command": "ollamaCoderChat.setOpenRouterApiKey",
-        "title": "OllamaUnofficial: Set OpenRouter API Key"
-      },
-      {
-        "command": "ollamaCoderChat.setHuggingFaceApiToken",
-        "title": "OllamaUnofficial: Set Hugging Face API Token"
-      },
-      {
-        "command": "ollamaCoderChat.showLog",
-        "title": "OllamaUnofficial: Show Log"
-      },
-      {
-        "command": "ollamaCoderChat.openBrowser",
-        "title": "OllamaUnofficial: Open Browser"
-      },
-      {
-        "command": "ollamaCoderChat.showWelcome",
-        "title": "OllamaUnofficial: Welcome and Walkthrough"
-      },
-      {
-        "command": "ollamaCoderChat.logout",
-        "title": "OllamaUnofficial: Logout Cloud Providers"
+        "command": "cascade.clearHistory",
+        "title": "Cascade: Clear All History"
       }
     ],
-    "menus": {
-      "view/title": [
-        {
-          "command": "ollamaCoderChat.newChat",
-          "when": "view == ollamaCoderChat.sidebar",
-          "group": "navigation@1"
-        }
-      ]
-    },
     "configuration": {
-      "title": "Ollama Coder Chat",
+      "title": "Cascade",
       "properties": {
-        "ollamaCoderChat.baseUrl": {
-          "type": "string",
-          "default": "http://127.0.0.1:11434",
-          "description": "Base URL for the local Ollama server."
-        },
-        "ollamaCoderChat.provider": {
+        "cascade.provider": {
           "type": "string",
           "enum": [
-            "ollama",
             "openrouter",
-            "huggingface"
+            "huggingface",
+            "groq"
           ],
-          "default": "ollama",
-          "description": "Where requests are sent: local Ollama, OpenRouter (cloud), or Hugging Face Inference router (cloud)."
+          "default": "openrouter",
+          "description": "Default AI provider"
         },
-        "ollamaCoderChat.model": {
+        "cascade.model": {
           "type": "string",
-          "default": "llama3.2",
-          "description": "Active model id: Ollama tag (e.g. llama3.2:latest), OpenRouter model id, or Hugging Face model id."
+          "default": "meta-llama/llama-3.3-70b-instruct:free",
+          "description": "Model identifier for the selected provider"
         },
-        "ollamaCoderChat.openRouterBaseUrl": {
-          "type": "string",
-          "default": "https://openrouter.ai/api/v1",
-          "description": "OpenRouter API base URL (OpenAI-compatible)."
-        },
-        "ollamaCoderChat.openRouterFreeOnly": {
-          "type": "boolean",
-          "default": true,
-          "description": "When listing OpenRouter models, only include models with $0 prompt and completion pricing."
-        },
-        "ollamaCoderChat.huggingfaceApiUrl": {
-          "type": "string",
-          "default": "https://router.huggingface.co/v1",
-          "description": "Hugging Face Inference OpenAI-compatible API base (v1/chat/completions)."
-        },
-        "ollamaCoderChat.temperature": {
+        "cascade.temperature": {
           "type": "number",
           "default": 0.2,
           "minimum": 0,
           "maximum": 2,
-          "description": "Sampling temperature for chat requests (Ollama, OpenRouter, Hugging Face)."
+          "description": "Sampling temperature"
         },
-        "ollamaCoderChat.maxTokens": {
+        "cascade.maxTokens": {
           "type": "number",
           "default": 4096,
-          "minimum": 1,
+          "minimum": 256,
           "maximum": 128000,
-          "description": "Maximum tokens to generate (OpenRouter/HF: max_tokens; Ollama: num_predict)."
+          "description": "Maximum tokens to generate"
         },
-        "ollamaCoderChat.topP": {
+        "cascade.topP": {
           "type": "number",
           "default": 1,
           "minimum": 0.01,
           "maximum": 1,
-          "description": "Nucleus sampling top_p for chat requests."
+          "description": "Top-p nucleus sampling"
         },
-        "ollamaCoderChat.approvalMode": {
-          "type": "string",
-          "enum": [
-            "ask",
-            "auto",
-            "chat"
-          ],
-          "default": "ask",
-          "description": "How edits are handled when the assistant suggests code: confirm each change, assume changes are applied, or chat-only (no edit workflow)."
-        },
-        "ollamaCoderChat.models": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "Extra model ids to always show in the picker (merged with provider discovery)."
-        },
-        "ollamaCoderChat.fileAccess": {
+        "cascade.fileAccess": {
           "type": "string",
           "enum": [
             "none",
@@ -186,45 +107,97 @@
             "readwrite"
           ],
           "default": "none",
-          "description": "File access level: none (disabled), read (list files and AI can request to read), readwrite (also apply edits to files)."
+          "description": "Allow reading or writing workspace files"
         },
-        "ollamaCoderChat.fileScope": {
+        "cascade.fileScope": {
           "type": "string",
           "enum": [
             "workspace",
             "anywhere"
           ],
           "default": "workspace",
-          "description": "Where the AI can access files: workspace (only open folders) or anywhere (any file on disk)."
+          "description": "Scope of file access"
         },
-        "ollamaCoderChat.terminalAccess": {
+        "cascade.terminalAccess": {
           "type": "boolean",
           "default": false,
-          "description": "Allow the AI to propose terminal commands that can be run in VS Code's integrated terminal with one click."
+          "description": "Allow running terminal commands"
         },
-        "ollamaCoderChat.gitAccess": {
+        "cascade.approvalMode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto",
+            "chat"
+          ],
+          "default": "ask",
+          "description": "How file/terminal actions are approved"
+        },
+        "cascade.gitAccess": {
           "type": "boolean",
           "default": false,
-          "description": "Allow git operations: view status, view diffs, commit staged changes, and push to remote."
+          "description": "Allow git operations (status, diff, commit, push)"
+        },
+        "cascade.openRouterFreeOnly": {
+          "type": "boolean",
+          "default": true,
+          "description": "Restrict OpenRouter model list to free ($0) models only"
+        },
+        "cascade.fallbackProvider": {
+          "type": "string",
+          "enum": [
+            "none",
+            "openrouter",
+            "huggingface",
+            "groq"
+          ],
+          "default": "none",
+          "description": "Fallback provider when the active one fails or has no key"
+        },
+        "cascade.contextLength": {
+          "type": "number",
+          "default": 20,
+          "minimum": 2,
+          "maximum": 50,
+          "description": "Number of previous messages sent as context"
+        },
+        "cascade.userName": {
+          "type": "string",
+          "default": "",
+          "description": "Your name \u2014 Cascade will address you by it"
+        },
+        "cascade.systemPrompt": {
+          "type": "string",
+          "default": "",
+          "description": "Custom text appended to Cascade's system prompt"
+        },
+        "cascade.historyRetention": {
+          "type": "string",
+          "enum": [
+            "unlimited",
+            "30",
+            "7",
+            "none"
+          ],
+          "default": "unlimited",
+          "description": "How long to keep chat history"
         }
       }
     }
   },
   "scripts": {
-    "framework": "npm install -D typescript @types/node @types/vscode @types/dompurify esbuild && npm install marked dompurify",
     "build": "node esbuild.mjs",
-    "watch": "node esbuild.mjs --watch",
-    "package": "vsce package"
+    "watch": "node esbuild.mjs --watch"
   },
   "devDependencies": {
-    "@types/dompurify": "^3.0.5",
-    "@types/node": "^22.19.17",
-    "@types/vscode": "^1.115.0",
-    "esbuild": "^0.24.2",
-    "typescript": "^5.9.3"
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.80.0",
+    "esbuild": "^0.21.0",
+    "typescript": "^5.3.0"
   },
   "dependencies": {
-    "dompurify": "^3.3.3",
-    "marked": "^18.0.0"
+    "dompurify": "^3.1.0",
+    "marked": "^12.0.0"
   }
 }
+

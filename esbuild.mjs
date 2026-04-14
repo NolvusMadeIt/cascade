@@ -1,33 +1,41 @@
-import esbuild from 'esbuild';
+import * as esbuild from 'esbuild';
 
-const isWatch = process.argv.includes('--watch');
+const watch = process.argv.includes('--watch');
 
-const extensionCtx = await esbuild.context({
-  entryPoints: ['src/extension.ts'],
+const baseOpts = {
   bundle: true,
-  format: 'cjs',
+  minify: !watch,
+  sourcemap: true,
+  logLevel: 'info',
+};
+
+// Extension host (Node context, external vscode)
+const extBuild = esbuild.build({
+  ...baseOpts,
+  entryPoints: ['src/extension.ts'],
   platform: 'node',
-  target: 'node20',
+  target: 'node18',
   outfile: 'dist/extension.js',
   external: ['vscode'],
-  sourcemap: true,
-  logLevel: 'info',
 });
 
-const webviewCtx = await esbuild.context({
+// Webview (browser context)
+const webBuild = esbuild.build({
+  ...baseOpts,
   entryPoints: ['src/webview/chat.ts'],
-  bundle: true,
-  format: 'iife',
   platform: 'browser',
-  target: 'es2022',
+  target: 'es2020',
   outfile: 'dist/chat.js',
-  sourcemap: true,
-  logLevel: 'info',
+  define: { global: 'globalThis' },
 });
 
-if (isWatch) {
-  await Promise.all([extensionCtx.watch(), webviewCtx.watch()]);
+if (watch) {
+  const [extCtx, webCtx] = await Promise.all([
+    esbuild.context({ ...baseOpts, entryPoints: ['src/extension.ts'], platform: 'node', target: 'node18', outfile: 'dist/extension.js', external: ['vscode'] }),
+    esbuild.context({ ...baseOpts, entryPoints: ['src/webview/chat.ts'], platform: 'browser', target: 'es2020', outfile: 'dist/chat.js', define: { global: 'globalThis' } }),
+  ]);
+  await Promise.all([extCtx.watch(), webCtx.watch()]);
+  console.log('Watching...');
 } else {
-  await Promise.all([extensionCtx.rebuild(), webviewCtx.rebuild()]);
-  await Promise.all([extensionCtx.dispose(), webviewCtx.dispose()]);
+  await Promise.all([extBuild, webBuild]);
 }

@@ -1,3 +1,5 @@
 node_modules/
-*.js.map
-out/
+*.vsix
+apply_changes.py
+fix_dupes.py
+repack.py

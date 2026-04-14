@@ -1,97 +1,162 @@
-import type * as vscode from 'vscode';
+import * as vscode from 'vscode';
 
-export type PersistedMessage = {
-  role: 'user' | 'assistant' | 'system';
+export interface ChatMessage {
+  role: 'user' | 'assistant';
   content: string;
-};
+}
 
-export type ChatSession = {
+export interface ChatSession {
   id: string;
   title: string;
+  messages: ChatMessage[];
+  createdAt: number;
   updatedAt: number;
-  archived?: boolean;
-  messages: PersistedMessage[];
-};
-
-const SESSIONS_KEY = 'ollamaCoderChat.sessions.v2';
-const ACTIVE_KEY = 'ollamaCoderChat.activeSessionId.v2';
-export const MAX_SESSIONS = 24;
-
-export function randomId(): string {
-  return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+  archived: boolean;
 }
 
-function truncateTitle(text: string, max = 40): string {
-  const one = text.replace(/\s+/g, ' ').trim();
-  if (one.length <= max) {
-    return one || 'New chat';
+const MAX_SESSIONS    = 80;
+const MAX_ARCHIVED    = 200;
+const STORAGE_KEY     = 'cascade.sessions';
+const ACTIVE_KEY      = 'cascade.activeSession';
+
+function makeId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function titleFromMessage(content: string): string {
+  const first = content.replace(/```[\s\S]*?```/g, '').trim().split('\n')[0].trim();
+  return first.length > 50 ? first.slice(0, 47) + '…' : first || 'New chat';
+}
+
+export class SessionManager {
+  private sessions: ChatSession[] = [];
+  private activeId = '';
+
+  constructor(private readonly storage: vscode.Memento) {
+    this.load();
   }
-  return `${one.slice(0, max - 1)}…`;
-}
 
-export function loadSessions(globalState: vscode.Memento): {
-  sessions: ChatSession[];
-  activeSessionId: string;
-} {
-  try {
-    const raw = globalState.get<string>(SESSIONS_KEY);
-    const sessions = raw
-      ? (JSON.parse(raw) as ChatSession[]).filter(
-          (s) => s && typeof s.id === 'string' && Array.isArray(s.messages)
-        )
-      : [];
-
-    for (const session of sessions) {
-      session.archived = Boolean(session.archived);
+  private load(): void {
+    const raw = this.storage.get<ChatSession[]>(STORAGE_KEY, []);
+    this.sessions = Array.isArray(raw) ? raw : [];
+    this.activeId = this.storage.get<string>(ACTIVE_KEY, '');
+    if (!this.sessions.find(s => s.id === this.activeId)) {
+      this.activeId = this.sessions[0]?.id ?? '';
     }
-
-    let activeSessionId = globalState.get<string>(ACTIVE_KEY) ?? '';
-
-    if (!sessions.length) {
-      const id = randomId();
-      sessions.push({ id, title: 'New chat', updatedAt: Date.now(), messages: [] });
-      activeSessionId = id;
+    if (!this.sessions.length) {
+      this.createSession();
     }
+  }
 
-    if (!sessions.some((s) => s.id === activeSessionId)) {
-      activeSessionId = sessions[0]?.id ?? '';
-    }
+  private async persist(): Promise<void> {
+    await this.storage.update(STORAGE_KEY, this.sessions);
+    await this.storage.update(ACTIVE_KEY, this.activeId);
+  }
 
-    return { sessions, activeSessionId };
-  } catch {
-    const id = randomId();
-    return {
-      sessions: [{ id, title: 'New chat', updatedAt: Date.now(), messages: [] }],
-      activeSessionId: id,
+  get active(): ChatSession | undefined {
+    return this.sessions.find(s => s.id === this.activeId);
+  }
+
+  get allSessions(): ChatSession[] {
+    return [...this.sessions];
+  }
+
+  get openSessions(): ChatSession[] {
+    return this.sessions.filter(s => !s.archived).slice(0, MAX_SESSIONS);
+  }
+
+  get historyItems(): ChatSession[] {
+    return [...this.sessions].sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  createSession(): ChatSession {
+    const session: ChatSession = {
+      id: makeId(),
+      title: 'New chat',
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      archived: false,
     };
-  }
-}
-
-export function saveSessions(
-  globalState: vscode.Memento,
-  sessions: ChatSession[],
-  activeSessionId: string
-): Thenable<void> {
-  const trimmed = sessions
-    .slice()
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, MAX_SESSIONS);
-
-  return Promise.all([
-    globalState.update(SESSIONS_KEY, JSON.stringify(trimmed)),
-    globalState.update(ACTIVE_KEY, activeSessionId),
-  ]).then(() => undefined);
-}
-
-export function upsertSessionTitleFromMessages(session: ChatSession): void {
-  if (session.title !== 'New chat') {
-    return;
+    this.sessions.unshift(session);
+    this.activeId = session.id;
+    // Trim excess archived
+    const archived = this.sessions.filter(s => s.archived);
+    if (archived.length > MAX_ARCHIVED) {
+      const keep = new Set(archived.slice(0, MAX_ARCHIVED).map(s => s.id));
+      this.sessions = this.sessions.filter(s => !s.archived || keep.has(s.id));
+    }
+    void this.persist();
+    return session;
   }
 
-  const firstUser = session.messages.find((m) => m.role === 'user');
+  switchTo(id: string): boolean {
+    const session = this.sessions.find(s => s.id === id);
+    if (!session) { return false; }
+    if (session.archived) { session.archived = false; }
+    this.activeId = id;
+    void this.persist();
+    return true;
+  }
 
-  if (firstUser?.content) {
-    const head = firstUser.content.split('\n')[0] ?? firstUser.content;
-    session.title = truncateTitle(head);
+  closeSession(id: string): void {
+    const session = this.sessions.find(s => s.id === id);
+    if (!session) { return; }
+    session.archived = true;
+    if (this.activeId === id) {
+      const open = this.openSessions.filter(s => s.id !== id);
+      this.activeId = open[0]?.id ?? '';
+      if (!this.activeId) {
+        this.createSession();
+        return;
+      }
+    }
+    void this.persist();
+  }
+
+  renameSession(id: string, title: string): void {
+    const session = this.sessions.find(s => s.id === id);
+    if (session) {
+      session.title = title.trim() || 'Chat';
+      void this.persist();
+    }
+  }
+
+  addMessage(role: 'user' | 'assistant', content: string): void {
+    const session = this.active;
+    if (!session) { return; }
+    session.messages.push({ role, content });
+    session.updatedAt = Date.now();
+    // Auto-title from first user message
+    if (session.title === 'New chat' && role === 'user') {
+      session.title = titleFromMessage(content);
+    }
+    void this.persist();
+  }
+
+  updateLastAssistant(content: string): void {
+    const session = this.active;
+    if (!session) { return; }
+    const last = session.messages.at(-1);
+    if (last?.role === 'assistant') {
+      last.content = content;
+      session.updatedAt = Date.now();
+      void this.persist();
+    }
+  }
+
+  clearMessages(): void {
+    const session = this.active;
+    if (!session) { return; }
+    session.messages = [];
+    session.title = 'New chat';
+    session.updatedAt = Date.now();
+    void this.persist();
+  }
+
+  clearAllHistory(): void {
+    this.sessions = [];
+    this.activeId = '';
+    this.createSession();
   }
 }
