@@ -252,13 +252,34 @@ async function checkForUpdate(ctx: vscode.ExtensionContext): Promise<void> {
 // ── Extension activation ──────────────────────────────────────────────
 export function activate(ctx: vscode.ExtensionContext): void {
   const provider = new CascadeViewProvider(ctx);
+  // Create separate providers per location — all share the same globalState sessions
+  const panelProvider    = new CascadeViewProvider(ctx);
+  const secondaryProvider = new CascadeViewProvider(ctx);
+
   ctx.subscriptions.push(
+    // ── Sidebar (primary activity bar)
     vscode.window.registerWebviewViewProvider('cascade.chat', provider, {
       webviewOptions: { retainContextWhenHidden: true }
     }),
+    // ── Bottom panel
+    vscode.window.registerWebviewViewProvider('cascade.panel', panelProvider, {
+      webviewOptions: { retainContextWhenHidden: true }
+    }),
+    // ── Secondary sidebar (right-hand side)
+    vscode.window.registerWebviewViewProvider('cascade.secondary', secondaryProvider, {
+      webviewOptions: { retainContextWhenHidden: true }
+    }),
+    // ── Chat commands
     vscode.commands.registerCommand('cascade.newChat',      () => provider.newChat()),
     vscode.commands.registerCommand('cascade.openSettings', () => provider.openSettingsCmd()),
     vscode.commands.registerCommand('cascade.clearHistory', () => provider.clearHistory()),
+    // ── Panel location commands
+    vscode.commands.registerCommand('cascade.focusSidebar',   () =>
+      vscode.commands.executeCommand('cascade.chat.focus')),
+    vscode.commands.registerCommand('cascade.focusPanel',     () =>
+      vscode.commands.executeCommand('cascade.panel.focus')),
+    vscode.commands.registerCommand('cascade.focusSecondary', () =>
+      vscode.commands.executeCommand('cascade.secondary.focus')),
   );
   // Background startup checks — endpoint health + update availability
   setTimeout(() => {
@@ -670,7 +691,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
               <div class="cd-section">
                 <div class="cd-section-hd">Cascade</div>
                 <p class="cd-section-desc">Free AI coding assistant for VS Code. Powered by the best zero-cost models — no subscription needed.</p>
-                <div class="cd-about-row"><span class="cd-about-label">Version</span><span class="cd-about-val">1.1.0</span></div>
+                <div class="cd-about-row"><span class="cd-about-label">Version</span><span class="cd-about-val">1.3.0</span></div>
                 <div class="cd-about-row"><span class="cd-about-label">Publisher</span><span class="cd-about-val">NolvusMadeIt</span></div>
                 <div class="cd-about-row"><span class="cd-about-label">Providers</span><span class="cd-about-val">OpenRouter · Hugging Face · Groq</span></div>
               </div>

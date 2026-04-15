@@ -1,10 +1,13 @@
 {
   "name": "cascade",
-  "displayName": "Cascade \u2014 Free AI Models",
+  "displayName": "Cascade — Free AI Models",
   "description": "AI coding assistant powered by free-tier models from OpenRouter, Hugging Face, and Groq. No paid plan required.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "publisher": "NolvusMadeIt",
-  "repository": { "type": "git", "url": "https://github.com/NolvusMadeIt/cascade.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NolvusMadeIt/cascade.git"
+  },
   "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.80.0"
@@ -36,6 +39,20 @@
           "title": "Cascade AI",
           "icon": "media/cascade-icon.svg"
         }
+      ],
+      "panel": [
+        {
+          "id": "cascade-panel-container",
+          "title": "Cascade",
+          "icon": "media/cascade-icon.svg"
+        }
+      ],
+      "auxiliarybar": [
+        {
+          "id": "cascade-secondary-container",
+          "title": "Cascade",
+          "icon": "media/cascade-icon.svg"
+        }
       ]
     },
     "views": {
@@ -43,6 +60,20 @@
         {
           "type": "webview",
           "id": "cascade.chat",
+          "name": "Cascade"
+        }
+      ],
+      "cascade-panel-container": [
+        {
+          "type": "webview",
+          "id": "cascade.panel",
+          "name": "Cascade"
+        }
+      ],
+      "cascade-secondary-container": [
+        {
+          "type": "webview",
+          "id": "cascade.secondary",
           "name": "Cascade"
         }
       ]
@@ -59,6 +90,21 @@
       {
         "command": "cascade.clearHistory",
         "title": "Cascade: Clear All History"
+      },
+      {
+        "command": "cascade.focusSidebar",
+        "title": "Cascade: Move/Focus in Sidebar",
+        "category": "Cascade"
+      },
+      {
+        "command": "cascade.focusPanel",
+        "title": "Cascade: Move/Focus in Bottom Panel",
+        "category": "Cascade"
+      },
+      {
+        "command": "cascade.focusSecondary",
+        "title": "Cascade: Move/Focus in Secondary Sidebar",
+        "category": "Cascade"
       }
     ],
     "configuration": {
@@ -165,7 +211,7 @@
         "cascade.userName": {
           "type": "string",
           "default": "",
-          "description": "Your name \u2014 Cascade will address you by it"
+          "description": "Your name — Cascade will address you by it"
         },
         "cascade.systemPrompt": {
           "type": "string",
@@ -184,6 +230,25 @@
           "description": "How long to keep chat history"
         }
       }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "cascade.focusSidebar",
+          "when": "view == cascade.panel || view == cascade.secondary",
+          "group": "navigation@99"
+        },
+        {
+          "command": "cascade.focusPanel",
+          "when": "view == cascade.chat || view == cascade.secondary",
+          "group": "navigation@99"
+        },
+        {
+          "command": "cascade.focusSecondary",
+          "when": "view == cascade.chat || view == cascade.panel",
+          "group": "navigation@99"
+        }
+      ]
     }
   },
   "scripts": {
@@ -201,4 +266,3 @@
     "marked": "^12.0.0"
   }
 }
-
