@@ -911,6 +911,25 @@ window.addEventListener('message', ({ data }) => {
       break;
     }
 
+    case 'rateLimitMsg': {
+      // Show / update the rate-limit countdown bar above the composer
+      let bar = document.getElementById('rateLimitBar');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'rateLimitBar';
+        bar.className = 'cd-rate-bar';
+        // Insert before the composer
+        const composer = document.querySelector('.cd-composer');
+        composer?.parentNode?.insertBefore(bar, composer);
+      }
+      bar.textContent = String(msg.text ?? '');
+      if ((msg.countdown as number) === 0) {
+        // Remove bar once retry fires
+        setTimeout(() => bar?.remove(), 3000);
+      }
+      break;
+    }
+
     case 'assistantStart':
       setBusy(true);
       pendingWrapper?.remove();
@@ -936,6 +955,8 @@ window.addEventListener('message', ({ data }) => {
       break;
 
     case 'assistantDone': {
+      // Clear rate-limit bar if still showing
+      document.getElementById('rateLimitBar')?.remove();
       setBusy(false);
       const text2 = String(msg.text ?? '');
       const { visible: vis, thinking } = stripThink(text2);

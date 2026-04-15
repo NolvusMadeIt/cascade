@@ -1168,6 +1168,78 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       const errMsg = err instanceof Error ? err.message : String(err);
+      // ── Rate-limit / overload detection (429 / 503 / 529) ──────────
+      const isRateLimit = /\b(429|503|529)\b/.test(errMsg) ||
+        /rate.limit|too many req|overload|temporarily unavail/i.test(errMsg);
+      if (isRateLimit) {
+        const fallback = cfg<string>('fallbackProvider', 'none') as Provider | 'none';
+        const fallbackKey = fallback !== 'none' ? await this.getKey(fallback as Provider) : undefined;
+        if (fallback !== 'none' && fallbackKey) {
+          // Switch to fallback provider silently and retry
+          this.post({ type: 'rateLimitMsg', text: `⚡ ${provider} rate limited — retrying with ${fallback}…`, countdown: 0 });
+          try {
+            let full2 = '';
+            let stepsSent2 = false;
+            this.abortCtrl = new AbortController();
+            for await (const chunk of streamChat(fallback as Provider, fallbackKey, DEFAULT_MODEL[fallback as Provider], messages, temp, maxTok, topP, this.abortCtrl.signal)) {
+              full2 += chunk;
+              if (!stepsSent2 && full2.includes('</steps>')) {
+                const sm2 = /<steps>([\s\S]*?)<\/steps>/.exec(full2);
+                if (sm2) {
+                  const steps2 = sm2[1].trim().split('\n').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+                  if (steps2.length) { this.post({ type: 'progressSteps', steps: steps2 }); }
+                  stepsSent2 = true;
+                }
+              }
+              this.post({ type: 'assistantDelta', text: full2 });
+            }
+            this.sessions.addMessage('assistant', full2);
+            this.post({ type: 'progressDone' });
+            this.post({ type: 'assistantDone', text: full2 });
+            this.pushSessionState();
+          } catch (err2) {
+            const e2 = err2 instanceof Error ? err2.message : String(err2);
+            this.post({ type: 'assistantError', text: `Fallback (${fallback}) also failed: ${e2}` });
+          }
+          return;
+        }
+        // No fallback — show countdown and auto-retry with same provider
+        const WAIT = 30;
+        this.post({ type: 'rateLimitMsg', text: `⏳ ${provider} rate limited (free tier). Retrying in ${WAIT}s…`, countdown: WAIT });
+        for (let t = WAIT - 1; t > 0; t--) {
+          await new Promise(res => setTimeout(res, 1000));
+          if (this.abortCtrl?.signal.aborted) { this.post({ type: 'assistantAbort' }); return; }
+          this.post({ type: 'rateLimitMsg', text: `⏳ Rate limited — retrying in ${t}s…`, countdown: t });
+        }
+        await new Promise(res => setTimeout(res, 1000));
+        if (this.abortCtrl?.signal.aborted) { this.post({ type: 'assistantAbort' }); return; }
+        this.post({ type: 'rateLimitMsg', text: `🔄 Retrying…`, countdown: 0 });
+        try {
+          let full3 = '';
+          let stepsSent3 = false;
+          this.abortCtrl = new AbortController();
+          for await (const chunk of streamChat(provider, key, model, messages, temp, maxTok, topP, this.abortCtrl.signal)) {
+            full3 += chunk;
+            if (!stepsSent3 && full3.includes('</steps>')) {
+              const sm3 = /<steps>([\s\S]*?)<\/steps>/.exec(full3);
+              if (sm3) {
+                const steps3 = sm3[1].trim().split('\n').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+                if (steps3.length) { this.post({ type: 'progressSteps', steps: steps3 }); }
+                stepsSent3 = true;
+              }
+            }
+            this.post({ type: 'assistantDelta', text: full3 });
+          }
+          this.sessions.addMessage('assistant', full3);
+          this.post({ type: 'progressDone' });
+          this.post({ type: 'assistantDone', text: full3 });
+          this.pushSessionState();
+        } catch (retryErr) {
+          const re = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          this.post({ type: 'assistantError', text: `Still rate limited after retry. Try a different model or provider.\n\n${re.slice(0, 120)}` });
+        }
+        return;
+      }
       this.post({ type: 'assistantError', text: errMsg });
     }
   }
