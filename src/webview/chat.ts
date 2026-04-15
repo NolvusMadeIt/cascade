@@ -798,6 +798,22 @@ window.addEventListener('message', ({ data }) => {
       renderChips();
       break;
 
+    case 'filesAutoCreated': {
+      // Show an inline "files created" notice below the last assistant message
+      const files2 = Array.isArray(msg.files) ? (msg.files as string[]) : [];
+      if (!files2.length) break;
+      const lastMsg2 = msgsEl.lastElementChild as HTMLElement | null;
+      if (!lastMsg2) break;
+      lastMsg2.querySelector('.cd-file-actions')?.remove();
+      const bar2 = document.createElement('div');
+      bar2.className = 'cd-file-actions cd-files-created';
+      bar2.innerHTML = `<span class="cd-fa-icon">&#10003;</span>&nbsp;Created&nbsp;` +
+        files2.map(n => `<strong>${n}</strong>`).join(', ') +
+        `&nbsp;<span class="cd-fa-dim">(opened in editor)</span>`;
+      lastMsg2.appendChild(bar2);
+      break;
+    }
+
     case 'suggestFileCreate': {
       const files = Array.isArray(msg.files) ? (msg.files as { name: string }[]) : [];
       if (!files.length) break;

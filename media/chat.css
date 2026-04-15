@@ -1302,3 +1302,14 @@ html, body {
   font-size: 13px;
   line-height: 1;
 }
+
+.cd-files-created {
+  border-top-color: rgba(63,185,80,.3) !important;
+  background: rgba(63,185,80,.07);
+  border-radius: 0 0 var(--r) var(--r);
+  font-size: 11.5px;
+  color: #3fb950;
+  padding: 5px 10px;
+  align-items: center;
+}
+.cd-fa-dim { opacity: 0.55; font-size: 10px; }

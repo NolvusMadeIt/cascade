@@ -2,7 +2,7 @@
   "name": "cascade",
   "displayName": "Cascade — Free AI Models",
   "description": "AI coding assistant powered by free-tier models from OpenRouter, Hugging Face, and Groq. No paid plan required.",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "publisher": "NolvusMadeIt",
   "repository": {
     "type": "git",
@@ -153,8 +153,8 @@
             "read",
             "readwrite"
           ],
-          "default": "none",
-          "description": "Allow reading or writing workspace files"
+          "default": "readwrite",
+          "description": "Allow reading or writing workspace files (default: readwrite)"
         },
         "cascade.fileScope": {
           "type": "string",

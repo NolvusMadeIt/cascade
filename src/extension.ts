@@ -248,21 +248,26 @@ async function checkForUpdate(ctx: vscode.ExtensionContext): Promise<void> {
 }
 
 // ── File-block extraction ─────────────────────────────────────────────
+// Permissive: checks first 5 lines of each code block for a File: comment
 function extractFileBlocks(text: string): { name: string; lang: string; code: string }[] {
   const blocks: { name: string; lang: string; code: string }[] = [];
-  // Match fenced code blocks whose first line is a file-path comment
-  const re = /```([\w+-]*)\n((?:\/\/|#|<!--)\s*[Ff]ile:\s*(.+?)(?:\s*-->)?\n[\s\S]*?)```/g;
+  const fenceRe = /```([ \t]*[\w+.-]*)[ \t]*\r?\n([\s\S]*?)```/g;
+  const commentRe = /(?:\/\/|#|<!-{2,})\s*[Ff]ile:\s*([^\r\n\-]+?)(?:\s*-{2,}>)?\s*$/;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const lang    = m[1].trim();
-    const body    = m[2];
-    const lines   = body.split('\n');
-    const comment = lines[0];
-    const nameMatch = /(?:\/\/|#|<!--)\s*[Ff]ile:\s*(.+?)(?:\s*-->)?$/.exec(comment.trim());
-    if (!nameMatch) continue;
-    const name = nameMatch[1].trim();
-    const fileCode = lines.slice(1).join('\n').trimEnd();
-    if (fileCode.length > 0) blocks.push({ name, lang, code: fileCode });
+  while ((m = fenceRe.exec(text)) !== null) {
+    const lang  = m[1].trim();
+    const body  = m[2];
+    const lines = body.split(/\r?\n/);
+    let name = '';
+    let codeStart = 0;
+    // Scan first 5 lines for file path comment
+    for (let i = 0; i < Math.min(5, lines.length); i++) {
+      const cm = commentRe.exec(lines[i].trim());
+      if (cm) { name = cm[1].trim(); codeStart = i + 1; break; }
+    }
+    if (!name) continue;
+    const fileCode = lines.slice(codeStart).join('\n').trimEnd();
+    if (fileCode.length > 20) blocks.push({ name, lang, code: fileCode });
   }
   return blocks;
 }
@@ -913,12 +918,15 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
     const userName    = cfg<string>('userName', '');
     const customPrmpt = cfg<string>('systemPrompt', '');
     const ctxLength   = cfg<number>('contextLength', 20);
+    const wsFolder = vscode.workspace.workspaceFolders?.[0];
+    const wsName   = wsFolder ? wsFolder.uri.fsPath : null;
     const systemParts: string[] = [
-      `You are Cascade, a friendly and expert AI coding assistant in VS Code.${userName ? ` The user's name is ${userName}.` : ''} Be warm, direct, and encouraging — like a skilled teammate who genuinely wants to help.`,
-      "Write in a natural, conversational tone. Be concise but thorough. Use 'I' naturally. Briefly acknowledge the user's context before diving in. Celebrate wins and be empathetic about frustrations.",
-      'When creating or modifying files: write the COMPLETE file content (never truncate) inside a fenced code block. ' +
-      'ALWAYS put the file path on line 1 as a comment matching the language, e.g. `// File: hello.html` or `# File: script.py` or `<!-- File: index.html -->`. ' +
-      'Use the correct relative path so the file lands in the right place in the workspace.',
+      `You are Cascade, a friendly and expert AI coding assistant built into VS Code.${userName ? ` The user's name is ${userName}.` : ''}${wsName ? ` The current workspace folder is: ${wsName}.` : ''} Be warm, direct, and encouraging — like a skilled teammate who genuinely wants to help.`,
+      "Write in a natural, conversational tone. Be concise but thorough. Use 'I' naturally. Briefly acknowledge the user's context before diving in.",
+      'CRITICAL — File creation rule: Whenever you create or modify a file, you MUST write the COMPLETE file content (never truncate or use placeholders like "rest of code here"). ' +
+      'Put the file path as a comment on the VERY FIRST LINE inside the fenced code block — before any other content. ' +
+      'Match the comment style to the language: HTML → `<!-- File: index.html -->`, JS/TS → `// File: app.ts`, Python → `# File: main.py`, CSS → `/* File: style.css */`. ' +
+      'Use a sensible relative path. This allows Cascade to automatically save the file to the workspace.',
       'For multi-step tasks, open your response with a <steps> block (max 5 items, plain text, one per line):\n<steps>\nAnalyse the request\nWrite the solution\nExplain key decisions\n</steps>\nThen continue with your full response.',
     ];
     if (customPrmpt) systemParts.push(customPrmpt);
@@ -977,12 +985,38 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: 'progressDone' });
       this.post({ type: 'assistantDone', text: full });
       this.pushSessionState(); // update tab title
-      // Detect code blocks with file paths and offer to create them
+      // Auto-create detected files in workspace; fall back to buttons if no workspace
       const fileBlocks = extractFileBlocks(full);
-      this.pendingFiles.clear();
-      for (const fb of fileBlocks) { this.pendingFiles.set(fb.name, { code: fb.code, lang: fb.lang }); }
       if (fileBlocks.length) {
-        this.post({ type: 'suggestFileCreate', files: fileBlocks.map(fb => ({ name: fb.name })) });
+        const ws = vscode.workspace.workspaceFolders?.[0]?.uri;
+        if (ws) {
+          // Auto-write every detected file directly to the workspace
+          const created: string[] = [];
+          let firstUri: vscode.Uri | undefined;
+          for (const fb of fileBlocks) {
+            try {
+              const parts   = fb.name.replace(/\\/g, '/').split('/');
+              const fileUri = vscode.Uri.joinPath(ws, ...parts);
+              if (parts.length > 1) {
+                await vscode.workspace.fs.createDirectory(
+                  vscode.Uri.joinPath(ws, ...parts.slice(0, -1))
+                ).catch(() => undefined);
+              }
+              await vscode.workspace.fs.writeFile(fileUri, Buffer.from(fb.code, 'utf8'));
+              created.push(fb.name);
+              if (!firstUri) firstUri = fileUri;
+            } catch { /* individual file errors are non-fatal */ }
+          }
+          if (created.length) {
+            if (firstUri) { void vscode.window.showTextDocument(firstUri, { preview: false }); }
+            this.post({ type: 'filesAutoCreated', files: created });
+          }
+        } else {
+          // No workspace open — show Save buttons so user can pick location
+          this.pendingFiles.clear();
+          for (const fb of fileBlocks) { this.pendingFiles.set(fb.name, { code: fb.code, lang: fb.lang }); }
+          this.post({ type: 'suggestFileCreate', files: fileBlocks.map(fb => ({ name: fb.name })) });
+        }
       }
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
