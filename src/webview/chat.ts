@@ -858,18 +858,42 @@ window.addEventListener('message', ({ data }) => {
     }
 
     case 'filesAutoCreated': {
-      // Show an inline "files created" notice below the last assistant message
       const files2 = Array.isArray(msg.files) ? (msg.files as string[]) : [];
       if (!files2.length) break;
       const lastMsg2 = msgsEl.lastElementChild as HTMLElement | null;
       if (!lastMsg2) break;
+
+      // ── Remove all code blocks from the bubble (they're on disk now) ────────
+      const bubble2 = lastMsg2.querySelector('.cd-bubble') as HTMLElement | null;
+      if (bubble2) {
+        // Remove collapsed wrappers
+        bubble2.querySelectorAll('.cd-code-collapsed').forEach(el => el.remove());
+        // Remove any bare pre elements
+        bubble2.querySelectorAll('pre').forEach(el => el.remove());
+        // If the bubble is now empty or whitespace-only, clear it
+        if (!bubble2.textContent?.trim()) {
+          bubble2.innerHTML = '';
+        }
+      }
+
+      // ── Replace / update the agent summary card ────────────────────────────
       lastMsg2.querySelector('.cd-file-actions')?.remove();
-      const bar2 = document.createElement('div');
-      bar2.className = 'cd-file-actions cd-files-created';
-      bar2.innerHTML = `<span class="cd-fa-icon">&#10003;</span>&nbsp;Created&nbsp;` +
-        files2.map(n => `<strong>${n}</strong>`).join(', ') +
-        `&nbsp;<span class="cd-fa-dim">(opened in editor)</span>`;
-      lastMsg2.appendChild(bar2);
+      const card = document.createElement('div');
+      card.className = 'cd-agent-card';
+      const fileList = files2.map(n => {
+        const parts = n.replace(/\\/g, '/').split('/');
+        const fname = parts[parts.length - 1];
+        const dir   = parts.length > 1 ? parts.slice(0, -1).join('/') + '/' : '';
+        return `<span class="cd-ac-file"><span class="cd-ac-dir">${dir}</span><strong>${fname}</strong></span>`;
+      }).join('');
+      card.innerHTML =
+        `<span class="cd-ac-icon codicon codicon-check"></span>` +
+        `<div class="cd-ac-body">` +
+          `<span class="cd-ac-label">Wrote ${files2.length} file${files2.length > 1 ? 's' : ''} to workspace</span>` +
+          `<div class="cd-ac-files">${fileList}</div>` +
+        `</div>`;
+      lastMsg2.appendChild(card);
+      msgsEl.scrollTop = msgsEl.scrollHeight;
       break;
     }
 

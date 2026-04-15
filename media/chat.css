@@ -1569,3 +1569,46 @@ html, body {
   text-align: center;
   animation: cd-fadein 0.25s ease;
 }
+
+/* ── Agent card (Cowork-style tool-use summary) ─────────────────────────── */
+.cd-agent-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: rgba(127,127,127,.07);
+  border: 1px solid rgba(127,127,127,.15);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.cd-ac-icon {
+  color: #4caf50;
+  font-size: 14px;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+.cd-ac-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.cd-ac-label {
+  color: var(--vscode-foreground);
+  font-weight: 500;
+  font-size: 12px;
+}
+.cd-ac-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.cd-ac-file {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+.cd-ac-dir { opacity: 0.6; }
+.cd-ac-file strong { color: var(--acc, #7aa2f7); font-weight: 500; }
