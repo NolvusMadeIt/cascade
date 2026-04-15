@@ -2,7 +2,7 @@
   "name": "cascade",
   "displayName": "Cascade — Free AI Models",
   "description": "AI coding assistant powered by free-tier models from OpenRouter, Hugging Face, and Groq. No paid plan required.",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "publisher": "NolvusMadeIt",
   "repository": {
     "type": "git",
@@ -122,16 +122,16 @@
         "cascade.provider": {
           "type": "string",
           "enum": [
+            "groq",
             "openrouter",
-            "huggingface",
-            "groq"
+            "huggingface"
           ],
-          "default": "openrouter",
+          "default": "groq",
           "description": "Default AI provider"
         },
         "cascade.model": {
           "type": "string",
-          "default": "meta-llama/llama-3.3-70b-instruct:free",
+          "default": "llama-3.3-70b-versatile",
           "description": "Model identifier for the selected provider"
         },
         "cascade.temperature": {

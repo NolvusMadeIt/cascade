@@ -130,6 +130,25 @@ async function* streamChat(
   }
 }
 
+// ── Clean up raw provider error messages ─────────────────────────────
+function cleanProviderError(raw: string): string {
+  try {
+    const jsonMatch = /\{[\s\S]+\}/.exec(raw);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+      const inner  = parsed?.error as Record<string, unknown> | undefined;
+      const msg    = (inner?.message ?? inner?.raw ?? parsed?.message ?? parsed?.detail) as string | undefined;
+      if (msg && typeof msg === 'string' && msg.length > 0) {
+        // trim at sentence boundary
+        const trimmed = msg.replace(/\s+/g, ' ').trim();
+        const dotIdx  = trimmed.indexOf('. ', 80);
+        return dotIdx > 0 ? trimmed.slice(0, dotIdx + 1) : trimmed.slice(0, 220);
+      }
+    }
+  } catch { /* not JSON */ }
+  return raw.slice(0, 200);
+}
+
 // ── Fetch OpenRouter free model list ─────────────────────────────────
 async function fetchOrFreeModels(key: string, freeOnly: boolean): Promise<string[]> {
   try {
@@ -1215,80 +1234,87 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
         this.post({ type: 'assistantAbort' });
         return;
       }
-      const errMsg = err instanceof Error ? err.message : String(err);
-      // ── Rate-limit / overload detection (429 / 503 / 529) ──────────
-      const isRateLimit = /\b(429|503|529)\b/.test(errMsg) ||
-        /rate.limit|too many req|overload|temporarily unavail/i.test(errMsg);
-      if (isRateLimit) {
-        const fallback = cfg<string>('fallbackProvider', 'none') as Provider | 'none';
-        const fallbackKey = fallback !== 'none' ? await this.getKey(fallback as Provider) : undefined;
-        if (fallback !== 'none' && fallbackKey) {
-          // Switch to fallback provider silently and retry
-          this.post({ type: 'rateLimitMsg', text: `⚡ ${provider} rate limited — retrying with ${fallback}…`, countdown: 0 });
-          try {
-            let full2 = '';
-            let stepsSent2 = false;
-            this.abortCtrl = new AbortController();
-            for await (const chunk of streamChat(fallback as Provider, fallbackKey, DEFAULT_MODEL[fallback as Provider], messages, temp, maxTok, topP, this.abortCtrl.signal)) {
-              full2 += chunk;
-              if (!stepsSent2 && full2.includes('</steps>')) {
-                const sm2 = /<steps>([\s\S]*?)<\/steps>/.exec(full2);
-                if (sm2) {
-                  const steps2 = sm2[1].trim().split('\n').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
-                  if (steps2.length) { this.post({ type: 'progressSteps', steps: steps2 }); }
-                  stepsSent2 = true;
-                }
-              }
-              this.post({ type: 'assistantDelta', text: full2 });
-            }
-            this.sessions.addMessage('assistant', full2);
-            this.post({ type: 'progressDone' });
-            this.post({ type: 'assistantDone', text: full2 });
-            this.pushSessionState();
-          } catch (err2) {
-            const e2 = err2 instanceof Error ? err2.message : String(err2);
-            this.post({ type: 'assistantError', text: `Fallback (${fallback}) also failed: ${e2}` });
-          }
-          return;
-        }
-        // No fallback — show countdown and auto-retry with same provider
-        const WAIT = 30;
-        this.post({ type: 'rateLimitMsg', text: `⏳ ${provider} rate limited (free tier). Retrying in ${WAIT}s…`, countdown: WAIT });
-        for (let t = WAIT - 1; t > 0; t--) {
-          await new Promise(res => setTimeout(res, 1000));
-          if (this.abortCtrl?.signal.aborted) { this.post({ type: 'assistantAbort' }); return; }
-          this.post({ type: 'rateLimitMsg', text: `⏳ Rate limited — retrying in ${t}s…`, countdown: t });
-        }
-        await new Promise(res => setTimeout(res, 1000));
-        if (this.abortCtrl?.signal.aborted) { this.post({ type: 'assistantAbort' }); return; }
-        this.post({ type: 'rateLimitMsg', text: `🔄 Retrying…`, countdown: 0 });
+      const rawErr = err instanceof Error ? err.message : String(err);
+      const errMsg = cleanProviderError(rawErr);
+
+      // ── Smart cascade: try every provider that has a key ───────────────────
+      // Preferred order: groq (most reliable free) → openrouter → huggingface
+      const CASCADE_ORDER: Provider[] = ['groq', 'openrouter', 'huggingface'];
+      const tried = new Set<Provider>([provider]);
+      let cascadeOk = false;
+
+      for (const np of CASCADE_ORDER) {
+        if (tried.has(np)) continue;
+        const nk = await this.getKey(np);
+        if (!nk) continue;
+        tried.add(np);
+
+        this.post({ type: 'rateLimitMsg',
+          text: `⚡ ${provider} unavailable — trying ${np}…`, countdown: 0 });
         try {
-          let full3 = '';
-          let stepsSent3 = false;
+          let fullC = '';
+          let stepsSentC = false;
           this.abortCtrl = new AbortController();
-          for await (const chunk of streamChat(provider, key, model, messages, temp, maxTok, topP, this.abortCtrl.signal)) {
-            full3 += chunk;
-            if (!stepsSent3 && full3.includes('</steps>')) {
-              const sm3 = /<steps>([\s\S]*?)<\/steps>/.exec(full3);
-              if (sm3) {
-                const steps3 = sm3[1].trim().split('\n').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
-                if (steps3.length) { this.post({ type: 'progressSteps', steps: steps3 }); }
-                stepsSent3 = true;
+          const nm = DEFAULT_MODEL[np];
+          for await (const chunk of streamChat(np, nk, nm, messages, temp, maxTok, topP, this.abortCtrl.signal)) {
+            fullC += chunk;
+            if (!stepsSentC && fullC.includes('</steps>')) {
+              const smC = /<steps>([\s\S]*?)<\/steps>/.exec(fullC);
+              if (smC) {
+                const sc = smC[1].trim().split('\n').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+                if (sc.length) { this.post({ type: 'progressSteps', steps: sc }); broadcastTasksUpdate(sc.map(t => ({ text: t, done: false }))); }
+                stepsSentC = true;
               }
             }
-            this.post({ type: 'assistantDelta', text: full3 });
+            this.post({ type: 'assistantDelta', text: fullC });
           }
-          this.sessions.addMessage('assistant', full3);
+          this.sessions.addMessage('assistant', fullC);
           this.post({ type: 'progressDone' });
-          this.post({ type: 'assistantDone', text: full3 });
+          this.post({ type: 'assistantDone', text: fullC });
+          broadcastTasksUpdate([]);
           this.pushSessionState();
-        } catch (retryErr) {
-          const re = retryErr instanceof Error ? retryErr.message : String(retryErr);
-          this.post({ type: 'assistantError', text: `Still rate limited after retry. Try a different model or provider.\n\n${re.slice(0, 120)}` });
+          document.getElementById?.('rateLimitBar')?.remove(); // clear banner
+          // Write files from cascade response
+          const fbC = extractFileBlocks(fullC);
+          if (fbC.length) {
+            const wsC = vscode.workspace.workspaceFolders?.[0]?.uri;
+            if (wsC) {
+              const createdC: string[] = []; let firstUriC: vscode.Uri | undefined;
+              for (const fb of fbC) {
+                try {
+                  const parts = fb.name.replace(/\\/g, '/').split('/');
+                  const fu = vscode.Uri.joinPath(wsC, ...parts);
+                  if (parts.length > 1) { await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(wsC, ...parts.slice(0, -1))).catch(() => undefined); }
+                  await vscode.workspace.fs.writeFile(fu, Buffer.from(fb.code, 'utf8'));
+                  createdC.push(fb.name); if (!firstUriC) firstUriC = fu;
+                } catch (we) { void vscode.window.showErrorMessage(`Cascade: Failed to write "${fb.name}": ${we instanceof Error ? we.message : we}`); }
+              }
+              if (createdC.length) {
+                if (firstUriC) { void vscode.window.showTextDocument(firstUriC, { preview: false }); }
+                void vscode.window.showInformationMessage(`Cascade wrote ${createdC.length} file${createdC.length > 1 ? 's' : ''}: ${createdC.join(', ')}`);
+                this.post({ type: 'filesAutoCreated', files: createdC });
+              }
+            }
+          }
+          cascadeOk = true;
+          break;
+        } catch (ce) {
+          if ((ce as Error).name === 'AbortError') { this.post({ type: 'assistantAbort' }); return; }
+          // next provider
         }
-        return;
       }
-      this.post({ type: 'assistantError', text: errMsg });
+
+      if (!cascadeOk) {
+        // All providers failed — give actionable advice
+        const hasGroq = !!(await this.getKey('groq'));
+        const hasOr   = !!(await this.getKey('openrouter'));
+        let tip = '';
+        if (!hasGroq) tip += '\n• **Add a Groq key** → console.groq.com (100% free, no credit card)';
+        if (!hasOr)   tip += '\n• **Add an OpenRouter key** → openrouter.ai (free `:free` models)';
+        if (!tip)     tip  = '\n• All your providers are currently rate-limited. Wait a minute, then try again.';
+        this.post({ type: 'assistantError',
+          text: `**All providers unavailable.**\n${errMsg}${tip}` });
+      }
     }
   }
 
