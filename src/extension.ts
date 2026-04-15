@@ -272,6 +272,68 @@ function extractFileBlocks(text: string): { name: string; lang: string; code: st
   return blocks;
 }
 
+
+// ── Tasks panel registry (receives progress broadcasts from chat) ───────
+const tasksProviders: CascadeTasksViewProvider[] = [];
+
+class CascadeTasksViewProvider implements vscode.WebviewViewProvider {
+  private view?: vscode.WebviewView;
+
+  resolveWebviewView(wv: vscode.WebviewView): void {
+    this.view = wv;
+    wv.webview.options = { enableScripts: true };
+    this.render([]);
+    tasksProviders.push(this);
+    wv.onDidDispose(() => {
+      const idx = tasksProviders.indexOf(this);
+      if (idx !== -1) tasksProviders.splice(idx, 1);
+    });
+  }
+
+  render(steps: { text: string; done: boolean }[]): void {
+    if (!this.view) return;
+    const nonce = getNonce();
+    const isEmpty = steps.length === 0;
+    const rows = steps.map((s, i) =>
+      `<div class="tp-item ${s.done ? 'done' : 'active'}">` +
+        `<span class="tp-dot">${s.done ? '✓' : i + 1}</span>` +
+        `<span class="tp-text">${s.text}</span>` +
+      `</div>`
+    ).join('');
+
+    this.view.webview.html = `<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8"/>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';"/>
+<style>
+  body { margin: 0; padding: 10px 12px; font-family: var(--vscode-font-family,'Segoe UI',sans-serif); font-size: 13px; color: var(--vscode-foreground); background: var(--vscode-sideBar-background); }
+  .tp-empty { color: var(--vscode-descriptionForeground); font-size: 11.5px; opacity: .6; padding: 12px 0; }
+  .tp-item { display: flex; align-items: flex-start; gap: 9px; padding: 5px 0; border-bottom: 1px solid rgba(127,127,127,.1); }
+  .tp-item:last-child { border-bottom: none; }
+  .tp-dot { flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; }
+  .tp-item.done .tp-dot { background: #2563eb; color: #fff; }
+  .tp-item.active .tp-dot { background: #D97757; color: #fff; animation: pulse 1s ease-in-out infinite; }
+  .tp-item.pending .tp-dot { border: 1.5px solid #888; color: #888; }
+  .tp-item.done .tp-text { text-decoration: line-through; opacity: .45; }
+  .tp-text { flex: 1; line-height: 1.4; font-size: 12px; }
+  .tp-hd { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #D97757; margin-bottom: 6px; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+</style>
+</head><body>
+<div class="tp-hd">Tasks &amp; Progress</div>
+${isEmpty ? '<div class="tp-empty">No active tasks — start a chat to see progress here.</div>' : rows}
+</body></html>`;
+  }
+
+  update(steps: { text: string; done: boolean }[]): void {
+    this.render(steps);
+  }
+}
+
+function broadcastTasksUpdate(steps: { text: string; done: boolean }[]): void {
+  for (const tp of tasksProviders) { tp.update(steps); }
+}
+
 // ── Extension activation ──────────────────────────────────────────────
 export function activate(ctx: vscode.ExtensionContext): void {
   const provider = new CascadeViewProvider(ctx);
@@ -290,6 +352,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }),
     // ── Secondary sidebar (right-hand side)
     vscode.window.registerWebviewViewProvider('cascade.secondary', secondaryProvider, {
+      webviewOptions: { retainContextWhenHidden: true }
+    }),
+    // ── Tasks & Progress panel (separate detachable panel)
+    vscode.window.registerWebviewViewProvider('cascade.tasks', new CascadeTasksViewProvider(), {
       webviewOptions: { retainContextWhenHidden: true }
     }),
     // ── Chat commands
@@ -504,18 +570,12 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
           <button type="button" class="cd-nav-item" data-page="chat">
             <span class="cd-nav-icon">💬</span>Chat
           </button>
-          <button type="button" class="cd-nav-item" data-page="chat">
-            <span class="cd-nav-icon">💬</span>Chat
-          </button>
           <button type="button" class="cd-nav-item" data-page="profile">
             <span class="cd-nav-icon">👤</span>Profile
           </button>
           <div class="cd-nav-divider"></div>
           <button type="button" class="cd-nav-item" data-page="privacy">
             <span class="cd-nav-icon">🔒</span>Privacy
-          </button>
-          <button type="button" class="cd-nav-item" data-page="stats">
-            <span class="cd-nav-icon">📊</span>Stats
           </button>
           <button type="button" class="cd-nav-item" data-page="stats">
             <span class="cd-nav-icon">📊</span>Stats
@@ -670,43 +730,6 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
               </div>
             </div>
 
-            <!-- ── Page: Chat ────────────────────────────────── -->
-            <div class="cd-settings-page" id="pageChat">
-              <div class="cd-section">
-                <div class="cd-section-hd">Code Blocks</div>
-                <div class="cd-toggle-row">
-                  <div class="cd-toggle-info">
-                    <div class="cd-toggle-title">Auto-collapse code</div>
-                    <div class="cd-toggle-desc">Hide code blocks by default — click to expand them in chat</div>
-                  </div>
-                  <label class="cd-toggle-switch">
-                    <input type="checkbox" id="chkAutoHideCode"/>
-                    <span class="cd-toggle-slider"></span>
-                  </label>
-                </div>
-              </div>
-              <div class="cd-section">
-                <div class="cd-section-hd">Display</div>
-                <div class="cd-field">
-                  <label class="cd-label" for="selMsgDensity">Message density</label>
-                  <select class="cd-input" id="selMsgDensity">
-                    <option value="comfortable">Comfortable (default)</option>
-                    <option value="compact">Compact</option>
-                    <option value="spacious">Spacious</option>
-                  </select>
-                </div>
-                <div class="cd-toggle-row">
-                  <div class="cd-toggle-info">
-                    <div class="cd-toggle-title">Show role labels</div>
-                    <div class="cd-toggle-desc">Show "You" and "Cascade" above each message</div>
-                  </div>
-                  <label class="cd-toggle-switch">
-                    <input type="checkbox" id="chkShowRoles" checked/>
-                    <span class="cd-toggle-slider"></span>
-                  </label>
-                </div>
-              </div>
-            </div>
 
             <!-- ── Page: Workspace ────────────────────────────── -->
             <div class="cd-settings-page" id="pageWorkspace">
@@ -825,28 +848,6 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
             </div>
 
             <!-- ── Page: Stats ───────────────────────────────── -->
-            <div class="cd-settings-page" id="pageStats">
-              <div class="cd-section">
-                <div class="cd-section-hd">Usage Overview</div>
-                <div class="cd-stats-grid">
-                  <div class="cd-stat-card"><div class="cd-stat-val" id="statSessions">—</div><div class="cd-stat-lbl">Sessions</div></div>
-                  <div class="cd-stat-card"><div class="cd-stat-val" id="statMessages">—</div><div class="cd-stat-lbl">Messages</div></div>
-                  <div class="cd-stat-card"><div class="cd-stat-val" id="statActiveDays">—</div><div class="cd-stat-lbl">Active days</div></div>
-                  <div class="cd-stat-card"><div class="cd-stat-val" id="statStreak">—</div><div class="cd-stat-lbl">Current streak</div></div>
-                </div>
-              </div>
-              <div class="cd-section">
-                <div class="cd-section-hd">Activity — Last 12 Weeks</div>
-                <div id="activityGrid" class="cd-activity-grid"></div>
-                <div id="statsCaption" class="cd-stats-caption"></div>
-              </div>
-              <div class="cd-section">
-                <div class="cd-section-hd">Breakdown</div>
-                <div class="cd-about-row"><span class="cd-about-label">Longest streak</span><span class="cd-about-val" id="statLongestStreak">—</span></div>
-                <div class="cd-about-row"><span class="cd-about-label">Peak day of week</span><span class="cd-about-val" id="statPeakDay">—</span></div>
-                <div class="cd-about-row"><span class="cd-about-label">Current provider</span><span class="cd-about-val" id="statProvider">—</span></div>
-                <div class="cd-about-row"><span class="cd-about-label">Current model</span><span class="cd-about-val" id="statModel">—</span></div>
-              </div>
             </div>
 
             <!-- ── Page: About ────────────────────────────────── -->
@@ -1119,7 +1120,10 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
           const stepsMatch = /<steps>([\s\S]*?)<\/steps>/.exec(full);
           if (stepsMatch) {
             const steps = stepsMatch[1].trim().split('\n').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
-            if (steps.length) { this.post({ type: 'progressSteps', steps }); }
+            if (steps.length) {
+              this.post({ type: 'progressSteps', steps });
+              broadcastTasksUpdate(steps.map((t, i) => ({ text: t, done: false })));
+            }
             stepsSent = true;
           }
         }
@@ -1128,6 +1132,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
       this.sessions.addMessage('assistant', full);
       this.post({ type: 'progressDone' });
       this.post({ type: 'assistantDone', text: full });
+      broadcastTasksUpdate([]); // clear tasks panel after done
       this.pushSessionState(); // update tab title
       // Auto-create detected files in workspace; fall back to buttons if no workspace
       const fileBlocks = extractFileBlocks(full);

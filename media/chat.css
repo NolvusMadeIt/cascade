@@ -831,6 +831,10 @@ html, body {
   font-size: 13px;
   flex-shrink: 0;
   opacity: 0.75;
+  width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .cd-nav-item.active .cd-nav-icon { opacity: 1; }
 

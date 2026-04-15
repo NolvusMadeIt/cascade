@@ -2,7 +2,7 @@
   "name": "cascade",
   "displayName": "Cascade — Free AI Models",
   "description": "AI coding assistant powered by free-tier models from OpenRouter, Hugging Face, and Groq. No paid plan required.",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "publisher": "NolvusMadeIt",
   "repository": {
     "type": "git",
@@ -66,8 +66,8 @@
       "cascade-panel-container": [
         {
           "type": "webview",
-          "id": "cascade.panel",
-          "name": "Cascade"
+          "id": "cascade.tasks",
+          "name": "Tasks & Progress"
         }
       ],
       "cascade-secondary-container": [
@@ -240,23 +240,7 @@
       }
     },
     "menus": {
-      "view/title": [
-        {
-          "command": "cascade.focusSidebar",
-          "when": "view == cascade.panel || view == cascade.secondary",
-          "group": "navigation"
-        },
-        {
-          "command": "cascade.focusPanel",
-          "when": "view == cascade.chat || view == cascade.secondary",
-          "group": "navigation"
-        },
-        {
-          "command": "cascade.focusSecondary",
-          "when": "view == cascade.chat || view == cascade.panel",
-          "group": "navigation"
-        }
-      ]
+      "view/title": []
     }
   },
   "scripts": {
