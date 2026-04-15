@@ -1,5 +1,6 @@
 node_modules/
 *.vsix
+!release/*.vsix
 apply_changes.py
 fix_dupes.py
 repack.py
