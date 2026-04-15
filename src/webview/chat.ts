@@ -798,6 +798,44 @@ window.addEventListener('message', ({ data }) => {
       renderChips();
       break;
 
+    case 'suggestFileCreate': {
+      const files = Array.isArray(msg.files) ? (msg.files as { name: string }[]) : [];
+      if (!files.length) break;
+      // Find the last assistant message bubble and append file-create buttons
+      const lastMsg = msgsEl.lastElementChild as HTMLElement | null;
+      if (!lastMsg) break;
+      // Remove any previous file-action bar on this message
+      lastMsg.querySelector('.cd-file-actions')?.remove();
+      const bar = document.createElement('div');
+      bar.className = 'cd-file-actions';
+      for (const f of files) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'cd-file-action-btn';
+        btn.innerHTML = `<span class="cd-fa-icon">&#128190;</span> Save <strong>${f.name}</strong>`;
+        btn.dataset.filename = f.name;
+        btn.addEventListener('click', () => {
+          btn.disabled = true;
+          btn.innerHTML = `<span class="cd-fa-icon">&#9203;</span> Creating…`;
+          vscode.postMessage({ type: 'createSuggestedFile', name: f.name });
+        });
+        bar.appendChild(btn);
+      }
+      lastMsg.appendChild(bar);
+      break;
+    }
+
+    case 'fileCreated': {
+      const name = String(msg.name ?? '');
+      const btn = msgsEl.querySelector<HTMLButtonElement>(`.cd-file-action-btn[data-filename="${CSS.escape(name)}"]`);
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="cd-fa-icon">&#10003;</span> Created <strong>${name}</strong>`;
+        btn.classList.add('done');
+      }
+      break;
+    }
+
     case 'assistantStart':
       setBusy(true);
       pendingWrapper?.remove();

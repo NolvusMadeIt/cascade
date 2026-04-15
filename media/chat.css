@@ -1258,3 +1258,47 @@ html, body {
   padding: 2px 3px !important;
   transition: transform .2s;
 }
+
+/* ── File-create action bar ─────────────────────────────────────────── */
+.cd-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--bd);
+}
+
+.cd-file-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--acc-bd);
+  background: var(--acc-bg);
+  color: var(--vscode-foreground);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, opacity 0.15s;
+}
+.cd-file-action-btn:hover:not(:disabled) {
+  background: rgba(217,119,87,.22);
+  border-color: var(--acc);
+}
+.cd-file-action-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.cd-file-action-btn.done {
+  border-color: rgba(63,185,80,.35);
+  background: rgba(63,185,80,.1);
+  color: #3fb950;
+}
+.cd-fa-icon {
+  font-style: normal;
+  font-size: 13px;
+  line-height: 1;
+}

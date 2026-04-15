@@ -247,6 +247,26 @@ async function checkForUpdate(ctx: vscode.ExtensionContext): Promise<void> {
   } catch { /* silent fail */ }
 }
 
+// ── File-block extraction ─────────────────────────────────────────────
+function extractFileBlocks(text: string): { name: string; lang: string; code: string }[] {
+  const blocks: { name: string; lang: string; code: string }[] = [];
+  // Match fenced code blocks whose first line is a file-path comment
+  const re = /```([\w+-]*)\n((?:\/\/|#|<!--)\s*[Ff]ile:\s*(.+?)(?:\s*-->)?\n[\s\S]*?)```/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const lang    = m[1].trim();
+    const body    = m[2];
+    const lines   = body.split('\n');
+    const comment = lines[0];
+    const nameMatch = /(?:\/\/|#|<!--)\s*[Ff]ile:\s*(.+?)(?:\s*-->)?$/.exec(comment.trim());
+    if (!nameMatch) continue;
+    const name = nameMatch[1].trim();
+    const fileCode = lines.slice(1).join('\n').trimEnd();
+    if (fileCode.length > 0) blocks.push({ name, lang, code: fileCode });
+  }
+  return blocks;
+}
+
 // ── Extension activation ──────────────────────────────────────────────
 export function activate(ctx: vscode.ExtensionContext): void {
   const provider = new CascadeViewProvider(ctx);
@@ -294,6 +314,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
   private sessions: SessionManager;
   private attachments: AttachmentItem[] = [];
   private abortCtrl?: AbortController;
+  private pendingFiles: Map<string, { code: string; lang: string }> = new Map();
 
   constructor(private readonly ctx: vscode.ExtensionContext) {
     this.sessions = new SessionManager(ctx.globalState);
@@ -864,6 +885,10 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
         await this.applyFileEdit(String(msg.code ?? ''), String(msg.language ?? ''), msg.suggestedPath as string | undefined);
         break;
 
+      case 'createSuggestedFile':
+        await this.createSuggestedFile(String(msg.name ?? ''));
+        break;
+
       case 'runInTerminal':
         await this.runInTerminal(String(msg.command ?? ''));
         break;
@@ -891,7 +916,9 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
     const systemParts: string[] = [
       `You are Cascade, a friendly and expert AI coding assistant in VS Code.${userName ? ` The user's name is ${userName}.` : ''} Be warm, direct, and encouraging — like a skilled teammate who genuinely wants to help.`,
       "Write in a natural, conversational tone. Be concise but thorough. Use 'I' naturally. Briefly acknowledge the user's context before diving in. Celebrate wins and be empathetic about frustrations.",
-      'Use markdown — fenced code blocks with language tags. For file edits put the file path as a comment on line 1, e.g. `// File: src/index.ts`.',
+      'When creating or modifying files: write the COMPLETE file content (never truncate) inside a fenced code block. ' +
+      'ALWAYS put the file path on line 1 as a comment matching the language, e.g. `// File: hello.html` or `# File: script.py` or `<!-- File: index.html -->`. ' +
+      'Use the correct relative path so the file lands in the right place in the workspace.',
       'For multi-step tasks, open your response with a <steps> block (max 5 items, plain text, one per line):\n<steps>\nAnalyse the request\nWrite the solution\nExplain key decisions\n</steps>\nThen continue with your full response.',
     ];
     if (customPrmpt) systemParts.push(customPrmpt);
@@ -950,6 +977,13 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: 'progressDone' });
       this.post({ type: 'assistantDone', text: full });
       this.pushSessionState(); // update tab title
+      // Detect code blocks with file paths and offer to create them
+      const fileBlocks = extractFileBlocks(full);
+      this.pendingFiles.clear();
+      for (const fb of fileBlocks) { this.pendingFiles.set(fb.name, { code: fb.code, lang: fb.lang }); }
+      if (fileBlocks.length) {
+        this.post({ type: 'suggestFileCreate', files: fileBlocks.map(fb => ({ name: fb.name })) });
+      }
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
         this.post({ type: 'assistantAbort' });
@@ -1150,6 +1184,35 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
   }
 
   // ── Apply file / run terminal ─────────────────────────────────────
+  private async createSuggestedFile(filePath: string): Promise<void> {
+    const entry = this.pendingFiles.get(filePath);
+    if (!entry) {
+      void vscode.window.showWarningMessage(`Cascade: Could not find code for "${filePath}". Try clicking Apply to File on the code block.`);
+      return;
+    }
+    const wsFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!wsFolder) {
+      // No workspace open — fall back to save dialog
+      await this.applyFileEdit(entry.code, entry.lang, filePath);
+      return;
+    }
+    try {
+      const targetUri = vscode.Uri.joinPath(wsFolder, filePath);
+      // Ensure parent directory exists
+      const parts = filePath.split('/');
+      if (parts.length > 1) {
+        const dirUri = vscode.Uri.joinPath(wsFolder, ...parts.slice(0, -1));
+        await vscode.workspace.fs.createDirectory(dirUri).catch(() => undefined);
+      }
+      await vscode.workspace.fs.writeFile(targetUri, Buffer.from(entry.code, 'utf8'));
+      await vscode.window.showTextDocument(targetUri);
+      this.post({ type: 'fileCreated', name: filePath });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      void vscode.window.showErrorMessage(`Cascade: Failed to create "${filePath}": ${msg}`);
+    }
+  }
+
   private async applyFileEdit(code: string, _lang: string, suggestedPath?: string): Promise<void> {
     const access = cfg('fileAccess', 'none');
     if (access !== 'readwrite') {
