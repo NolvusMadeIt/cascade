@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 import { SessionManager } from './chatSessions';
 
 // ── Types ─────────────────────────────────────────────────────────────
-type Provider = 'openrouter' | 'huggingface' | 'groq';
+type Provider = 'openrouter' | 'huggingface' | 'groq' | 'ollama';
 
 interface AttachmentItem { id: string; label: string; content: string }
 
@@ -42,12 +42,23 @@ const FREE_MODELS: Record<Provider, string[]> = {
     'llama3-70b-8192',
     'llama3-8b-8192',
   ],
+  ollama: [
+    'qwen2.5-coder:7b',
+    'qwen2.5-coder:14b',
+    'qwen2.5-coder:32b',
+    'deepseek-coder-v2:16b',
+    'codellama:7b',
+    'codellama:13b',
+    'codegemma:7b',
+    'starcoder2:7b',
+  ],
 };
 
 const DEFAULT_MODEL: Record<Provider, string> = {
   openrouter: 'meta-llama/llama-3.3-70b-instruct:free',
   huggingface: 'Qwen/Qwen2.5-Coder-32B-Instruct',
   groq: 'llama-3.3-70b-versatile',
+  ollama: 'qwen2.5-coder:7b',
 };
 
 // ── Provider API endpoints ────────────────────────────────────────────
@@ -59,6 +70,8 @@ function chatEndpoint(provider: Provider, model: string): string {
       return endpointOverrides['groq'] ?? 'https://api.groq.com/openai/v1/chat/completions';
     case 'huggingface':
       return endpointOverrides['huggingface'] ?? 'https://router.huggingface.co/v1/chat/completions';
+    case 'ollama':
+      return endpointOverrides['ollama'] ?? 'http://localhost:11434/v1/chat/completions';
   }
 }
 
@@ -71,6 +84,8 @@ function buildHeaders(provider: Provider, key: string): Record<string, string> {
       return { ...base, 'Authorization': `Bearer ${key}` };
     case 'groq':
       return { ...base, 'Authorization': `Bearer ${key}` };
+    case 'ollama':
+      return base; // Local — no auth needed
   }
 }
 
@@ -147,6 +162,66 @@ function cleanProviderError(raw: string): string {
     }
   } catch { /* not JSON */ }
   return raw.slice(0, 200);
+}
+
+// ── Ollama helpers ────────────────────────────────────────────────
+async function fetchOllamaModels(): Promise<string[]> {
+  try {
+    const res = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return FREE_MODELS.ollama;
+    const data = await res.json() as { models?: { name: string }[] };
+    const names = (data.models ?? []).map(m => m.name).sort();
+    return names.length ? names : FREE_MODELS.ollama;
+  } catch {
+    return FREE_MODELS.ollama;
+  }
+}
+
+async function isOllamaRunning(): Promise<boolean> {
+  try {
+    const res = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(2000) });
+    return res.ok;
+  } catch { return false; }
+}
+
+async function pullOllamaModel(name: string): Promise<void> {
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Pulling ${name}…`, cancellable: true },
+    async (progress, token) => {
+      const ctrl = new AbortController();
+      token.onCancellationRequested(() => ctrl.abort());
+      const res = await fetch('http://localhost:11434/api/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error(`Pull failed: ${res.statusText}`);
+      if (!res.body) return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const j = JSON.parse(line) as { status?: string; completed?: number; total?: number };
+            if (j.total && j.completed) {
+              progress.report({ increment: (j.completed / j.total) * 100, message: j.status ?? '' });
+            } else if (j.status) {
+              progress.report({ message: j.status });
+            }
+          } catch { /* skip */ }
+        }
+      }
+      void vscode.window.showInformationMessage(`Cascade: Model "${name}" ready.`);
+    }
+  );
 }
 
 // ── Fetch OpenRouter free model list ─────────────────────────────────
@@ -390,6 +465,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
       vscode.commands.executeCommand('cascade.secondary.focus')),
     vscode.commands.registerCommand('cascade.showTasks', () =>
       vscode.commands.executeCommand('cascade.tasks.focus')),
+    vscode.commands.registerCommand('cascade.pullModel', async () => {
+      const name = await vscode.window.showInputBox({ prompt: 'Ollama model name', placeHolder: 'qwen2.5-coder:7b' });
+      if (name) { await pullOllamaModel(name); }
+    }),
   );
   // Background startup checks — endpoint health + update availability
   setTimeout(() => {
@@ -464,6 +543,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
       <option value="openrouter"${provider==='openrouter' ? ' selected':''}>OpenRouter</option>
       <option value="huggingface"${provider==='huggingface' ? ' selected':''}>HuggingFace</option>
       <option value="groq"${provider==='groq' ? ' selected':''}>Groq</option>
+      <option value="ollama"${provider==='ollama' ? ' selected':''}>Ollama (Local)</option>
     </select>
     <select id="modelSel" class="cd-select wide" title="Model">
       <option value="${escHtml(model)}">${escHtml(model)}</option>
@@ -513,7 +593,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
             <tr><td>Git</td><td><span class="cd-badge" id="capGit">Off</span></td></tr>
             <tr><td>Multi-file Context</td><td><span class="cd-badge on" id="capCtx">On</span></td></tr>
           </table>
-          <p class="cd-empty-hint">Open ⚙ to add your free API key and unlock models.</p>
+          <p class="cd-empty-hint">Open ⚙ Settings → Local Models to download a free coding model via Ollama. No API keys needed.</p>
         </div>
       </div>
       <!-- Messages -->
@@ -556,7 +636,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
         </div>
       </div>
       <div class="cd-hint">
-        <span>Keys are free — get one at openrouter.ai · huggingface.co · console.groq.com</span>
+        <span>Using Ollama? No key needed. Or get free keys at console.groq.com · openrouter.ai</span>
       </div>
     </footer>
   </div><!-- /#mainView -->
@@ -577,32 +657,38 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
         <!-- Left nav sidebar -->
         <nav class="cd-panel-nav">
           <button type="button" class="cd-nav-item active" data-page="keys">
-            <span class="cd-nav-icon">🔑</span>API Keys
+            API Keys
           </button>
           <button type="button" class="cd-nav-item" data-page="models">
-            <span class="cd-nav-icon">⚡</span>Models
+            Models
+          </button>
+          <button type="button" class="cd-nav-item" data-page="local">
+            Local Models (Ollama)
           </button>
           <button type="button" class="cd-nav-item" data-page="sampling">
-            <span class="cd-nav-icon">🎛</span>Sampling
+            Sampling
           </button>
           <button type="button" class="cd-nav-item" data-page="workspace">
-            <span class="cd-nav-icon">🗂</span>Workspace
+            Workspace
           </button>
           <button type="button" class="cd-nav-item" data-page="chat">
-            <span class="cd-nav-icon">💬</span>Chat
+            Chat
           </button>
           <button type="button" class="cd-nav-item" data-page="profile">
-            <span class="cd-nav-icon">👤</span>Profile
+            Profile
           </button>
           <div class="cd-nav-divider"></div>
+          <button type="button" class="cd-nav-item" data-page="notifications">
+            Notifications
+          </button>
           <button type="button" class="cd-nav-item" data-page="privacy">
-            <span class="cd-nav-icon">🔒</span>Privacy
+            Privacy
           </button>
           <button type="button" class="cd-nav-item" data-page="stats">
-            <span class="cd-nav-icon">📊</span>Stats
+            Stats
           </button>
           <button type="button" class="cd-nav-item" data-page="about">
-            <span class="cd-nav-icon">ℹ</span>About
+            About
           </button>
         </nav>
 
@@ -686,6 +772,65 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
                     <option value="huggingface">Hugging Face</option>
                     <option value="groq">Groq</option>
                   </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── Page: Local Models (Ollama) ──────────────── -->
+            <div class="cd-settings-page" id="pageLocal">
+              <div class="cd-section">
+                <div class="cd-section-hd">Ollama Status</div>
+                <p class="cd-section-desc">Ollama runs AI models locally on your machine — completely free, no API keys, no limits. <a href="https://ollama.com" class="cd-about-link">Get Ollama ↗</a></p>
+                <div class="cd-field">
+                  <span id="ollamaStatus" class="cd-key-status unset"><span class="cd-key-dot"></span>Checking…</span>
+                </div>
+              </div>
+              <div class="cd-section">
+                <div class="cd-section-hd">Pull a Coding Model</div>
+                <p class="cd-section-desc">Download a model optimized for code. Larger = smarter but needs more RAM/VRAM.</p>
+                <div class="cd-field">
+                  <select class="cd-input" id="selOllamaPull">
+                    <option value="qwen2.5-coder:7b">qwen2.5-coder:7b  (4.7 GB — fast, good coder)</option>
+                    <option value="qwen2.5-coder:14b">qwen2.5-coder:14b  (9 GB — strong coder)</option>
+                    <option value="qwen2.5-coder:32b">qwen2.5-coder:32b  (20 GB — best quality)</option>
+                    <option value="deepseek-coder-v2:16b">deepseek-coder-v2:16b  (9 GB — DeepSeek)</option>
+                    <option value="codellama:7b">codellama:7b  (3.8 GB — Meta Code Llama)</option>
+                    <option value="codellama:13b">codellama:13b  (7.4 GB — larger Code Llama)</option>
+                    <option value="codegemma:7b">codegemma:7b  (5 GB — Google code model)</option>
+                    <option value="starcoder2:7b">starcoder2:7b  (4 GB — StarCoder)</option>
+                  </select>
+                </div>
+                <button type="button" class="cd-btn primary" id="btnPullModel" style="margin-top:6px">Download Model</button>
+              </div>
+              <div class="cd-section">
+                <div class="cd-section-hd">Context Length</div>
+                <p class="cd-section-desc">How much of the conversation the model can remember. Higher = more memory usage.</p>
+                <div class="cd-field">
+                  <input type="range" class="cd-slider" id="sldCtxLen" min="4096" max="131072" step="4096" value="32768"/>
+                  <div class="cd-slider-labels">
+                    <span>4k</span><span>8k</span><span>16k</span><span>32k</span><span>64k</span><span>128k</span>
+                  </div>
+                  <div class="cd-slider-val" id="sldCtxLenVal">32k</div>
+                </div>
+              </div>
+              <div class="cd-section">
+                <div class="cd-section-hd">Model Storage</div>
+                <p class="cd-section-desc">Where Ollama stores downloaded models. Change via Ollama's OLLAMA_MODELS environment variable.</p>
+                <div class="cd-field">
+                  <input type="text" class="cd-input" id="inpModelPath" placeholder="Default: ~/.ollama/models" readonly style="opacity:.7"/>
+                </div>
+              </div>
+              <div class="cd-section">
+                <div class="cd-section-hd">Updates</div>
+                <div class="cd-toggle-row">
+                  <div class="cd-toggle-info">
+                    <div class="cd-toggle-title">Auto-check model updates</div>
+                    <div class="cd-toggle-desc">Check for newer versions of your downloaded models on startup</div>
+                  </div>
+                  <label class="cd-toggle-switch">
+                    <input type="checkbox" id="chkAutoUpdateModels" checked/>
+                    <span class="cd-toggle-slider"></span>
+                  </label>
                 </div>
               </div>
             </div>
@@ -821,6 +966,54 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
               </div>
             </div>
 
+            <!-- ── Page: Notifications ────────────────────────── -->
+            <div class="cd-settings-page" id="pageNotifications">
+              <div class="cd-section">
+                <div class="cd-section-hd">Toast Notifications</div>
+                <p class="cd-section-desc">Control which notifications appear in VS Code's bottom-left corner.</p>
+                <div class="cd-toggle-row">
+                  <div class="cd-toggle-info">
+                    <div class="cd-toggle-title">File write confirmations</div>
+                    <div class="cd-toggle-desc">Show toast when files are created or updated</div>
+                  </div>
+                  <label class="cd-toggle-switch">
+                    <input type="checkbox" id="chkNotifyFiles" checked/>
+                    <span class="cd-toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="cd-toggle-row">
+                  <div class="cd-toggle-info">
+                    <div class="cd-toggle-title">Model download progress</div>
+                    <div class="cd-toggle-desc">Show progress bar when pulling Ollama models</div>
+                  </div>
+                  <label class="cd-toggle-switch">
+                    <input type="checkbox" id="chkNotifyDownloads" checked/>
+                    <span class="cd-toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="cd-toggle-row">
+                  <div class="cd-toggle-info">
+                    <div class="cd-toggle-title">Extension updates</div>
+                    <div class="cd-toggle-desc">Notify when a new Cascade version is available</div>
+                  </div>
+                  <label class="cd-toggle-switch">
+                    <input type="checkbox" id="chkNotifyUpdates" checked/>
+                    <span class="cd-toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="cd-toggle-row">
+                  <div class="cd-toggle-info">
+                    <div class="cd-toggle-title">Rate limit warnings</div>
+                    <div class="cd-toggle-desc">Show toast when a provider is rate limited</div>
+                  </div>
+                  <label class="cd-toggle-switch">
+                    <input type="checkbox" id="chkNotifyRateLimit" checked/>
+                    <span class="cd-toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
             <!-- ── Page: Privacy ──────────────────────────────── -->
             <div class="cd-settings-page" id="pagePrivacy">
               <div class="cd-section">
@@ -878,7 +1071,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
                 <p class="cd-section-desc">Free AI coding assistant for VS Code. Powered by the best zero-cost models — no subscription needed.</p>
                 <div class="cd-about-row"><span class="cd-about-label">Version</span><span class="cd-about-val" id="aboutVersion">—</span></div>
                 <div class="cd-about-row"><span class="cd-about-label">Publisher</span><span class="cd-about-val">NolvusMadeIt</span></div>
-                <div class="cd-about-row"><span class="cd-about-label">Providers</span><span class="cd-about-val">OpenRouter · Hugging Face · Groq</span></div>
+                <div class="cd-about-row"><span class="cd-about-label">Providers</span><span class="cd-about-val">Ollama · Groq · OpenRouter · HuggingFace</span></div>
               </div>
               <div class="cd-section">
                 <div class="cd-section-hd">Links</div>
@@ -986,6 +1179,20 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
       case 'logout':
         await this.logout();
         break;
+
+      case 'pullModel': {
+        const modelName = String(msg.name ?? 'qwen2.5-coder:7b');
+        pullOllamaModel(modelName).then(() => this.pushModels()).catch(e => {
+          void vscode.window.showErrorMessage('Cascade: Pull failed — ' + (e instanceof Error ? e.message : String(e)));
+        });
+        break;
+      }
+      case 'checkOllama': {
+        isOllamaRunning().then(ok => {
+          this.post({ type: 'ollamaStatus', running: ok });
+        });
+        break;
+      }
 
       case 'clearAllHistory':
         this.sessions.clearAllHistory();
@@ -1375,7 +1582,8 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async getKey(provider: Provider): Promise<string | undefined> {
-    const keyMap: Record<Provider, string> = {
+    if (provider === 'ollama') return 'local'; // No key needed for local models
+    const keyMap: Record<string, string> = {
       openrouter: 'cascade.orKey',
       huggingface: 'cascade.hfKey',
       groq: 'cascade.groqKey',
@@ -1402,7 +1610,9 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     let models: string[];
-    if (provider === 'openrouter') {
+    if (provider === 'ollama') {
+      models = await fetchOllamaModels();
+    } else if (provider === 'openrouter') {
       models = await fetchOrFreeModels(key, freeOnly);
     } else {
       models = [...FREE_MODELS[provider]];

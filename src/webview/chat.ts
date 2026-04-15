@@ -580,6 +580,7 @@ newChatBtn.addEventListener('click', () => vscode.postMessage({ type: 'newSessio
 refreshBtn.addEventListener('click', () => vscode.postMessage({ type: 'getModels' }));
 
 settingsBtn.addEventListener('click', () => {
+  vscode.postMessage({ type: 'checkOllama' });
   if (!settingsOverlay.classList.contains('hidden')) { closeSettings(); return; }
   openSettings();
 });
@@ -617,6 +618,22 @@ settingsSave.addEventListener('click', () => {
   showToast();
   setTimeout(closeSettings, 900);
 });
+
+// Ollama pull model button
+document.getElementById('btnPullModel')?.addEventListener('click', () => {
+  const sel = document.getElementById('selOllamaPull') as HTMLSelectElement | null;
+  if (sel) { vscode.postMessage({ type: 'pullModel', name: sel.value }); }
+});
+
+// Context length slider
+const sldCtxLen = document.getElementById('sldCtxLen') as HTMLInputElement | null;
+const sldCtxLenVal = document.getElementById('sldCtxLenVal');
+if (sldCtxLen && sldCtxLenVal) {
+  sldCtxLen.addEventListener('input', () => {
+    const v = parseInt(sldCtxLen.value, 10);
+    sldCtxLenVal.textContent = v >= 1024 ? (v / 1024) + 'k' : String(v);
+  });
+}
 
 logoutBtn.addEventListener('click', () => vscode.postMessage({ type: 'logout' }));
 clearHistBtn?.addEventListener('click', () => {
@@ -950,6 +967,18 @@ window.addEventListener('message', ({ data }) => {
       if ((msg.countdown as number) === 0) {
         // Remove bar once retry fires
         setTimeout(() => bar?.remove(), 3000);
+      }
+      break;
+    }
+
+    case 'ollamaStatus': {
+      const olSt = document.getElementById('ollamaStatus');
+      if (olSt) {
+        const running = !!(msg as Record<string,unknown>).running;
+        olSt.className = running ? 'cd-key-status set' : 'cd-key-status unset';
+        olSt.innerHTML = running
+          ? '<span class="cd-key-dot"></span>Running'
+          : '<span class="cd-key-dot"></span>Not running — <a href="https://ollama.com" class="cd-about-link">install Ollama</a>';
       }
       break;
     }
