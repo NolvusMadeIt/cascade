@@ -57,10 +57,8 @@ function chatEndpoint(provider: Provider, model: string): string {
       return endpointOverrides['openrouter'] ?? 'https://openrouter.ai/api/v1/chat/completions';
     case 'groq':
       return endpointOverrides['groq'] ?? 'https://api.groq.com/openai/v1/chat/completions';
-    case 'huggingface': {
-      const base = endpointOverrides['huggingface'] ?? 'https://router.huggingface.co';
-      return `${base}/${model}/v1/chat/completions`;
-    }
+    case 'huggingface':
+      return endpointOverrides['huggingface'] ?? 'https://router.huggingface.co/v1/chat/completions';
   }
 }
 
