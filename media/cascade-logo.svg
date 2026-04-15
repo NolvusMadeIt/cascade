@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <defs>
+    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#D97757"/>
+      <stop offset="100%" stop-color="#E8956A"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#D97757" stop-opacity="0.78"/>
+      <stop offset="100%" stop-color="#E8956A" stop-opacity="0.78"/>
+    </linearGradient>
+    <linearGradient id="g3" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#D97757" stop-opacity="0.48"/>
+      <stop offset="100%" stop-color="#E8956A" stop-opacity="0.48"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Bar 1 — top, full opacity -->
+  <rect x="48" y="90" width="148" height="34" rx="17" fill="url(#g1)" filter="url(#glow)"/>
+
+  <!-- Bar 2 — middle, 78% opacity, offset right -->
+  <rect x="80" y="142" width="148" height="34" rx="17" fill="url(#g2)" filter="url(#glow)"/>
+
+  <!-- Bar 3 — bottom, 48% opacity, offset more -->
+  <rect x="112" y="194" width="132" height="34" rx="17" fill="url(#g3)" filter="url(#glow)"/>
+</svg>

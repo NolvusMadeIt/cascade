@@ -3,3 +3,7 @@ node_modules/
 apply_changes.py
 fix_dupes.py
 repack.py
+*.py
+*.ps1
+*_log.txt
+*_err.txt

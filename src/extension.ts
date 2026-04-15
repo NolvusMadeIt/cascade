@@ -53,10 +53,14 @@ const DEFAULT_MODEL: Record<Provider, string> = {
 // ── Provider API endpoints ────────────────────────────────────────────
 function chatEndpoint(provider: Provider, model: string): string {
   switch (provider) {
-    case 'openrouter': return 'https://openrouter.ai/api/v1/chat/completions';
-    case 'groq':       return 'https://api.groq.com/openai/v1/chat/completions';
-    case 'huggingface':
-      return `https://api-inference.huggingface.co/models/${model}/v1/chat/completions`;
+    case 'openrouter':
+      return endpointOverrides['openrouter'] ?? 'https://openrouter.ai/api/v1/chat/completions';
+    case 'groq':
+      return endpointOverrides['groq'] ?? 'https://api.groq.com/openai/v1/chat/completions';
+    case 'huggingface': {
+      const base = endpointOverrides['huggingface'] ?? 'https://router.huggingface.co';
+      return `${base}/${model}/v1/chat/completions`;
+    }
   }
 }
 
@@ -167,6 +171,84 @@ async function setCfg(key: string, value: unknown): Promise<void> {
   await vscode.workspace.getConfiguration('cascade').update(key, value, vscode.ConfigurationTarget.Global);
 }
 
+// ── Runtime endpoint overrides (loaded from GitHub on startup) ────────
+let endpointOverrides: Record<string, string> = {};
+
+const ENDPOINTS_URL =
+  'https://raw.githubusercontent.com/NolvusMadeIt/cascade/main/endpoints.json';
+const RELEASES_URL =
+  'https://api.github.com/repos/NolvusMadeIt/cascade/releases/latest';
+
+async function checkEndpoints(ctx: vscode.ExtensionContext): Promise<void> {
+  try {
+    const res = await fetch(ENDPOINTS_URL, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return;
+    const remote = await res.json() as Record<string, string>;
+    const prev   = ctx.globalState.get<Record<string, string>>('cascade.endpoints', {});
+    const isFirstRun = Object.keys(prev).length === 0;
+    // Apply overrides immediately so all subsequent requests use updated URLs
+    endpointOverrides = { ...remote };
+    await ctx.globalState.update('cascade.endpoints', remote);
+    if (!isFirstRun) {
+      const changed = Object.entries(remote).some(([k, v]) => prev[k] !== v);
+      if (changed) {
+        const choice = await vscode.window.showInformationMessage(
+          'Cascade: Provider endpoints have been updated. Reload VS Code to apply the changes.',
+          'Reload Now', 'Later'
+        );
+        if (choice === 'Reload Now') {
+          await vscode.commands.executeCommand('workbench.action.reloadWindow');
+        }
+      }
+    }
+  } catch { /* network unavailable — silent fail */ }
+}
+
+async function checkForUpdate(ctx: vscode.ExtensionContext): Promise<void> {
+  try {
+    const res = await fetch(RELEASES_URL, {
+      headers: { 'User-Agent': 'cascade-vscode' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return;
+    const release = await res.json() as {
+      tag_name: string;
+      assets: { name: string; browser_download_url: string }[];
+    };
+    const latest  = release.tag_name.replace(/^v/, '');
+    const current = (ctx.extension.packageJSON as { version: string }).version;
+    if (latest === current) return;
+    const toNum = (v: string) => v.split('.').map(Number).reduce((a, n, i) => a + n * (1000 ** (2 - i)), 0);
+    if (toNum(latest) <= toNum(current)) return;
+    const asset = release.assets.find(a => a.name.endsWith('.vsix'));
+    if (!asset) return;
+    const choice = await vscode.window.showInformationMessage(
+      `Cascade v${latest} is available (you have v${current}). Install the update now?`,
+      'Download & Install', 'Later'
+    );
+    if (choice !== 'Download & Install') return;
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Cascade: Downloading update…', cancellable: false },
+      async () => {
+        const dl  = await fetch(asset.browser_download_url, { signal: AbortSignal.timeout(120000) });
+        if (!dl.ok) throw new Error('Download failed');
+        const buf     = await dl.arrayBuffer();
+        await ctx.globalStorageUri && vscode.workspace.fs.createDirectory(ctx.globalStorageUri).catch(() => undefined);
+        const tmpUri  = vscode.Uri.joinPath(ctx.globalStorageUri, `cascade-${latest}.vsix`);
+        await vscode.workspace.fs.writeFile(tmpUri, new Uint8Array(buf));
+        await vscode.commands.executeCommand('workbench.extensions.installExtension', tmpUri);
+      }
+    );
+    const restart = await vscode.window.showInformationMessage(
+      `Cascade v${latest} installed! Reload VS Code to activate it.`,
+      'Reload Now', 'Later'
+    );
+    if (restart === 'Reload Now') {
+      await vscode.commands.executeCommand('workbench.action.reloadWindow');
+    }
+  } catch { /* silent fail */ }
+}
+
 // ── Extension activation ──────────────────────────────────────────────
 export function activate(ctx: vscode.ExtensionContext): void {
   const provider = new CascadeViewProvider(ctx);
@@ -178,6 +260,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('cascade.openSettings', () => provider.openSettingsCmd()),
     vscode.commands.registerCommand('cascade.clearHistory', () => provider.clearHistory()),
   );
+  // Background startup checks — endpoint health + update availability
+  setTimeout(() => {
+    void checkEndpoints(ctx);
+    void checkForUpdate(ctx);
+  }, 3000); // delay 3 s so VS Code finishes loading first
 }
 
 export function deactivate(): void { /* nothing */ }
@@ -210,6 +297,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
     const scriptUri = wv.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'dist', 'chat.js'));
     const styleUri  = wv.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'chat.css'));
     const iconUri   = wv.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'icon.svg'));
+    const logoUri   = wv.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'cascade-logo.svg'));
 
     const provider = cfg<Provider>('provider', 'openrouter');
     const model    = cfg<string>('model', DEFAULT_MODEL[provider]);
@@ -258,6 +346,15 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
   <!-- ── Session tabs ──────────────────────────────────────────── -->
   <div class="cd-tabs" id="tabsBar"></div>
 
+  <!-- ── Progress panel ────────────────────────────────────────── -->
+  <div id="progressPanel" class="cd-progress hidden">
+    <div class="cd-progress-head">
+      <span class="cd-progress-title">Progress</span>
+      <button type="button" class="cd-icon-btn cd-pgr-chevron" id="pgrCollapse" title="Collapse">&#8743;</button>
+    </div>
+    <div id="progressList" class="cd-progress-list"></div>
+  </div>
+
   <!-- ── Status ────────────────────────────────────────────────── -->
   <div class="cd-status">
     <span class="cd-status-left idle">
@@ -274,7 +371,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
       <!-- Empty state -->
       <div id="empty" class="cd-empty" style="display:flex">
         <div class="cd-empty-inner">
-          <img class="cd-empty-icon" src="${iconUri}" alt=""/>
+          <img class="cd-empty-icon" src="${logoUri}" alt=""/>
           <div class="cd-empty-title">Cascade</div>
           <p class="cd-empty-sub">Free AI coding assistant. Powered by the best zero-cost models — no subscription needed.</p>
           <table class="cd-caps">
@@ -573,7 +670,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
               <div class="cd-section">
                 <div class="cd-section-hd">Cascade</div>
                 <p class="cd-section-desc">Free AI coding assistant for VS Code. Powered by the best zero-cost models — no subscription needed.</p>
-                <div class="cd-about-row"><span class="cd-about-label">Version</span><span class="cd-about-val">1.0.0</span></div>
+                <div class="cd-about-row"><span class="cd-about-label">Version</span><span class="cd-about-val">1.1.0</span></div>
                 <div class="cd-about-row"><span class="cd-about-label">Publisher</span><span class="cd-about-val">NolvusMadeIt</span></div>
                 <div class="cd-about-row"><span class="cd-about-label">Providers</span><span class="cd-about-val">OpenRouter · Hugging Face · Groq</span></div>
               </div>
