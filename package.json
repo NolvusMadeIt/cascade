@@ -2,7 +2,7 @@
   "name": "cascade",
   "displayName": "Cascade — Free AI Models",
   "description": "AI coding assistant powered by free-tier models from OpenRouter, Hugging Face, and Groq. No paid plan required.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "publisher": "NolvusMadeIt",
   "repository": {
     "type": "git",
@@ -93,18 +93,21 @@
       },
       {
         "command": "cascade.focusSidebar",
-        "title": "Cascade: Move/Focus in Sidebar",
-        "category": "Cascade"
+        "title": "Move to Sidebar",
+        "category": "Cascade",
+        "icon": "$(layout-sidebar-left)"
       },
       {
         "command": "cascade.focusPanel",
-        "title": "Cascade: Move/Focus in Bottom Panel",
-        "category": "Cascade"
+        "title": "Move to Panel",
+        "category": "Cascade",
+        "icon": "$(layout-panel)"
       },
       {
         "command": "cascade.focusSecondary",
-        "title": "Cascade: Move/Focus in Secondary Sidebar",
-        "category": "Cascade"
+        "title": "Move to Secondary Sidebar",
+        "category": "Cascade",
+        "icon": "$(layout-sidebar-right)"
       }
     ],
     "configuration": {
@@ -228,6 +231,11 @@
           ],
           "default": "unlimited",
           "description": "How long to keep chat history"
+        },
+        "cascade.autoHideCode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically collapse code blocks in chat (click to expand)"
         }
       }
     },
@@ -236,17 +244,17 @@
         {
           "command": "cascade.focusSidebar",
           "when": "view == cascade.panel || view == cascade.secondary",
-          "group": "navigation@99"
+          "group": "navigation"
         },
         {
           "command": "cascade.focusPanel",
           "when": "view == cascade.chat || view == cascade.secondary",
-          "group": "navigation@99"
+          "group": "navigation"
         },
         {
           "command": "cascade.focusSecondary",
           "when": "view == cascade.chat || view == cascade.panel",
-          "group": "navigation@99"
+          "group": "navigation"
         }
       ]
     }

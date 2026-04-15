@@ -395,7 +395,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
   <div id="progressPanel" class="cd-progress hidden">
     <div class="cd-progress-head">
       <span class="cd-progress-title">Progress</span>
-      <button type="button" class="cd-icon-btn cd-pgr-chevron" id="pgrCollapse" title="Collapse">&#8743;</button>
+      <button type="button" class="cd-icon-btn cd-pgr-chevron cd-chevron-lg" id="pgrCollapse" title="Collapse">&#8743;</button>
     </div>
     <div id="progressList" class="cd-progress-list"></div>
   </div>
@@ -447,24 +447,25 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
               <button type="button" id="modeAsk">Ask</button>
               <button type="button" id="modePlan">Plan</button>
             </div>
-            <!-- Context menu -->
-            <div class="cd-menu" id="attachMenu">
-              <div class="cd-menu-search">
-                <input id="attachSearch" type="text" placeholder="Filter…"/>
-              </div>
-              <div class="cd-menu-list">
-                <button type="button" class="cd-menu-item" data-action="activeFile"    data-filter="active file editor">Active file</button>
-                <button type="button" class="cd-menu-item" data-action="openEditors"   data-filter="open editors tabs">Open editors…</button>
-                <button type="button" class="cd-menu-item" data-action="workspaceFile" data-filter="workspace file folder disk">File from workspace…</button>
-                <button type="button" class="cd-menu-item" data-action="localFile"     data-filter="upload local file">Upload file…</button>
-                <button type="button" class="cd-menu-item" data-action="problems"      data-filter="problems errors warnings diagnostics">Problems</button>
-                <button type="button" class="cd-menu-item" data-action="clipboard"     data-filter="clipboard image screenshot">Image from clipboard</button>
-              </div>
-            </div>
+
           </div>
           <div class="cd-tb-right">
             <button type="button" class="cd-send" id="sendBtn" title="Send (Enter)">↑</button>
           </div>
+        </div>
+      </div>
+      <!-- Context menu (outside cd-card to avoid overflow:hidden clipping) -->
+      <div class="cd-menu" id="attachMenu">
+        <div class="cd-menu-search">
+          <input id="attachSearch" type="text" placeholder="Filter…"/>
+        </div>
+        <div class="cd-menu-list">
+          <button type="button" class="cd-menu-item" data-action="activeFile"    data-filter="active file editor">Active file</button>
+          <button type="button" class="cd-menu-item" data-action="openEditors"   data-filter="open editors tabs">Open editors…</button>
+          <button type="button" class="cd-menu-item" data-action="workspaceFile" data-filter="workspace file folder disk">File from workspace…</button>
+          <button type="button" class="cd-menu-item" data-action="localFile"     data-filter="upload local file">Upload file…</button>
+          <button type="button" class="cd-menu-item" data-action="problems"      data-filter="problems errors warnings diagnostics">Problems</button>
+          <button type="button" class="cd-menu-item" data-action="clipboard"     data-filter="clipboard image screenshot">Image from clipboard</button>
         </div>
       </div>
       <div class="cd-hint">
@@ -480,7 +481,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
       <!-- Full-width title bar -->
       <div class="cd-panel-head">
         <span class="cd-panel-title">Settings</span>
-        <button type="button" class="cd-icon-btn" id="settingsClose" title="Close">×</button>
+        <button type="button" class="cd-icon-btn cd-close-btn" id="settingsClose" title="Close">×</button>
       </div>
 
       <!-- Two-column layout: nav + content -->
@@ -500,12 +501,24 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
           <button type="button" class="cd-nav-item" data-page="workspace">
             <span class="cd-nav-icon">🗂</span>Workspace
           </button>
+          <button type="button" class="cd-nav-item" data-page="chat">
+            <span class="cd-nav-icon">💬</span>Chat
+          </button>
+          <button type="button" class="cd-nav-item" data-page="chat">
+            <span class="cd-nav-icon">💬</span>Chat
+          </button>
           <button type="button" class="cd-nav-item" data-page="profile">
             <span class="cd-nav-icon">👤</span>Profile
           </button>
           <div class="cd-nav-divider"></div>
           <button type="button" class="cd-nav-item" data-page="privacy">
             <span class="cd-nav-icon">🔒</span>Privacy
+          </button>
+          <button type="button" class="cd-nav-item" data-page="stats">
+            <span class="cd-nav-icon">📊</span>Stats
+          </button>
+          <button type="button" class="cd-nav-item" data-page="stats">
+            <span class="cd-nav-icon">📊</span>Stats
           </button>
           <button type="button" class="cd-nav-item" data-page="about">
             <span class="cd-nav-icon">ℹ</span>About
@@ -619,6 +632,82 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
               </div>
             </div>
 
+            <!-- ── Page: Chat ────────────────────────────────── -->
+            <div class="cd-settings-page" id="pageChat">
+              <div class="cd-section">
+                <div class="cd-section-hd">Code Blocks</div>
+                <div class="cd-toggle-row">
+                  <div class="cd-toggle-info">
+                    <div class="cd-toggle-title">Auto-collapse code</div>
+                    <div class="cd-toggle-desc">Hide code blocks by default — click to expand them in chat</div>
+                  </div>
+                  <label class="cd-toggle-switch">
+                    <input type="checkbox" id="chkAutoHideCode"/>
+                    <span class="cd-toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="cd-section">
+                <div class="cd-section-hd">Display</div>
+                <div class="cd-field">
+                  <label class="cd-label" for="selMsgDensity">Message density</label>
+                  <select class="cd-input" id="selMsgDensity">
+                    <option value="comfortable">Comfortable (default)</option>
+                    <option value="compact">Compact</option>
+                    <option value="spacious">Spacious</option>
+                  </select>
+                </div>
+                <div class="cd-toggle-row">
+                  <div class="cd-toggle-info">
+                    <div class="cd-toggle-title">Show role labels</div>
+                    <div class="cd-toggle-desc">Show "You" and "Cascade" above each message</div>
+                  </div>
+                  <label class="cd-toggle-switch">
+                    <input type="checkbox" id="chkShowRoles" checked/>
+                    <span class="cd-toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── Page: Chat ────────────────────────────────── -->
+            <div class="cd-settings-page" id="pageChat">
+              <div class="cd-section">
+                <div class="cd-section-hd">Code Blocks</div>
+                <div class="cd-toggle-row">
+                  <div class="cd-toggle-info">
+                    <div class="cd-toggle-title">Auto-collapse code</div>
+                    <div class="cd-toggle-desc">Hide code blocks by default — click to expand them in chat</div>
+                  </div>
+                  <label class="cd-toggle-switch">
+                    <input type="checkbox" id="chkAutoHideCode"/>
+                    <span class="cd-toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="cd-section">
+                <div class="cd-section-hd">Display</div>
+                <div class="cd-field">
+                  <label class="cd-label" for="selMsgDensity">Message density</label>
+                  <select class="cd-input" id="selMsgDensity">
+                    <option value="comfortable">Comfortable (default)</option>
+                    <option value="compact">Compact</option>
+                    <option value="spacious">Spacious</option>
+                  </select>
+                </div>
+                <div class="cd-toggle-row">
+                  <div class="cd-toggle-info">
+                    <div class="cd-toggle-title">Show role labels</div>
+                    <div class="cd-toggle-desc">Show "You" and "Cascade" above each message</div>
+                  </div>
+                  <label class="cd-toggle-switch">
+                    <input type="checkbox" id="chkShowRoles" checked/>
+                    <span class="cd-toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
             <!-- ── Page: Workspace ────────────────────────────── -->
             <div class="cd-settings-page" id="pageWorkspace">
               <div class="cd-section">
@@ -710,12 +799,62 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
               </div>
             </div>
 
+            <!-- ── Page: Stats ───────────────────────────────── -->
+            <div class="cd-settings-page" id="pageStats">
+              <div class="cd-section">
+                <div class="cd-section-hd">Usage Overview</div>
+                <div class="cd-stats-grid">
+                  <div class="cd-stat-card"><div class="cd-stat-val" id="statSessions">—</div><div class="cd-stat-lbl">Sessions</div></div>
+                  <div class="cd-stat-card"><div class="cd-stat-val" id="statMessages">—</div><div class="cd-stat-lbl">Messages</div></div>
+                  <div class="cd-stat-card"><div class="cd-stat-val" id="statActiveDays">—</div><div class="cd-stat-lbl">Active days</div></div>
+                  <div class="cd-stat-card"><div class="cd-stat-val" id="statStreak">—</div><div class="cd-stat-lbl">Current streak</div></div>
+                </div>
+              </div>
+              <div class="cd-section">
+                <div class="cd-section-hd">Activity — Last 12 Weeks</div>
+                <div id="activityGrid" class="cd-activity-grid"></div>
+                <div id="statsCaption" class="cd-stats-caption"></div>
+              </div>
+              <div class="cd-section">
+                <div class="cd-section-hd">Breakdown</div>
+                <div class="cd-about-row"><span class="cd-about-label">Longest streak</span><span class="cd-about-val" id="statLongestStreak">—</span></div>
+                <div class="cd-about-row"><span class="cd-about-label">Peak day of week</span><span class="cd-about-val" id="statPeakDay">—</span></div>
+                <div class="cd-about-row"><span class="cd-about-label">Current provider</span><span class="cd-about-val" id="statProvider">—</span></div>
+                <div class="cd-about-row"><span class="cd-about-label">Current model</span><span class="cd-about-val" id="statModel">—</span></div>
+              </div>
+            </div>
+
+            <!-- ── Page: Stats ───────────────────────────────── -->
+            <div class="cd-settings-page" id="pageStats">
+              <div class="cd-section">
+                <div class="cd-section-hd">Usage Overview</div>
+                <div class="cd-stats-grid">
+                  <div class="cd-stat-card"><div class="cd-stat-val" id="statSessions">—</div><div class="cd-stat-lbl">Sessions</div></div>
+                  <div class="cd-stat-card"><div class="cd-stat-val" id="statMessages">—</div><div class="cd-stat-lbl">Messages</div></div>
+                  <div class="cd-stat-card"><div class="cd-stat-val" id="statActiveDays">—</div><div class="cd-stat-lbl">Active days</div></div>
+                  <div class="cd-stat-card"><div class="cd-stat-val" id="statStreak">—</div><div class="cd-stat-lbl">Current streak</div></div>
+                </div>
+              </div>
+              <div class="cd-section">
+                <div class="cd-section-hd">Activity — Last 12 Weeks</div>
+                <div id="activityGrid" class="cd-activity-grid"></div>
+                <div id="statsCaption" class="cd-stats-caption"></div>
+              </div>
+              <div class="cd-section">
+                <div class="cd-section-hd">Breakdown</div>
+                <div class="cd-about-row"><span class="cd-about-label">Longest streak</span><span class="cd-about-val" id="statLongestStreak">—</span></div>
+                <div class="cd-about-row"><span class="cd-about-label">Peak day of week</span><span class="cd-about-val" id="statPeakDay">—</span></div>
+                <div class="cd-about-row"><span class="cd-about-label">Current provider</span><span class="cd-about-val" id="statProvider">—</span></div>
+                <div class="cd-about-row"><span class="cd-about-label">Current model</span><span class="cd-about-val" id="statModel">—</span></div>
+              </div>
+            </div>
+
             <!-- ── Page: About ────────────────────────────────── -->
             <div class="cd-settings-page" id="pageAbout">
               <div class="cd-section">
                 <div class="cd-section-hd">Cascade</div>
                 <p class="cd-section-desc">Free AI coding assistant for VS Code. Powered by the best zero-cost models — no subscription needed.</p>
-                <div class="cd-about-row"><span class="cd-about-label">Version</span><span class="cd-about-val">1.3.0</span></div>
+                <div class="cd-about-row"><span class="cd-about-label">Version</span><span class="cd-about-val" id="aboutVersion">—</span></div>
                 <div class="cd-about-row"><span class="cd-about-label">Publisher</span><span class="cd-about-val">NolvusMadeIt</span></div>
                 <div class="cd-about-row"><span class="cd-about-label">Providers</span><span class="cd-about-val">OpenRouter · Hugging Face · Groq</span></div>
               </div>
@@ -813,6 +952,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
 
       case 'getSettings':
         await this.pushSettings();
+        this.pushStats();
         break;
 
       case 'saveSettings':
@@ -851,6 +991,10 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
 
       case 'getHistory':
         this.pushHistory();
+        break;
+
+      case 'getStats':
+        this.pushStats();
         break;
 
       case 'restoreSession':
@@ -1050,6 +1194,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
       userName:            cfg('userName', ''),
       systemPrompt:        cfg('systemPrompt', ''),
       historyRetention:    cfg('historyRetention', 'unlimited'),
+      autoHideCode:        cfg('autoHideCode', true),
     });
   }
 
@@ -1071,6 +1216,8 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
     if (msg.userName         !== undefined) await setCfg('userName',         String(msg.userName));
     if (msg.systemPrompt     !== undefined) await setCfg('systemPrompt',     String(msg.systemPrompt));
     if (msg.historyRetention !== undefined) await setCfg('historyRetention', String(msg.historyRetention));
+    if (msg.autoHideCode     !== undefined) await setCfg('autoHideCode',     Boolean(msg.autoHideCode));
+    if (msg.autoHideCode     !== undefined) await setCfg('autoHideCode',     Boolean(msg.autoHideCode));
   }
 
   private async logout(): Promise<void> {
@@ -1137,6 +1284,78 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
     this.attachments = [];
     this.pushAttachments();
   }
+
+  // ── Usage stats ──────────────────────────────────────────────────
+  private pushStats(): void {
+    const all = this.sessions.allSessions;
+    const totalMsgs = all.reduce((s, sess) => s + sess.messages.length, 0);
+    // Collect distinct calendar days from session activity
+    const daySet = new Set<string>();
+    const dayCounts: Record<string, number> = {};
+    for (const sess of all) {
+      for (const msg of sess.messages) {
+        // We use session updatedAt as proxy (messages lack individual timestamps)
+      }
+      const d = new Date(sess.updatedAt).toISOString().slice(0, 10);
+      daySet.add(d);
+      dayCounts[d] = (dayCounts[d] ?? 0) + sess.messages.length;
+    }
+    // Include session createdAt too
+    for (const sess of all) {
+      const d = new Date(sess.createdAt).toISOString().slice(0, 10);
+      daySet.add(d);
+      if (!dayCounts[d]) dayCounts[d] = 0;
+    }
+    const sortedDays = [...daySet].sort();
+    // Compute streak
+    let streak = 0, longestStreak = 0, run = 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    for (let i = 0; i < sortedDays.length; i++) {
+      const prev = i > 0 ? sortedDays[i - 1] : '';
+      const curr = sortedDays[i];
+      const dayDiff = prev ? (new Date(curr).getTime() - new Date(prev).getTime()) / 86400000 : 1;
+      run = dayDiff === 1 ? run + 1 : 1;
+      if (run > longestStreak) longestStreak = run;
+    }
+    if (daySet.has(today) || daySet.has(yesterday)) {
+      let d = daySet.has(today) ? today : yesterday;
+      while (daySet.has(d)) {
+        streak++;
+        d = new Date(new Date(d).getTime() - 86400000).toISOString().slice(0, 10);
+      }
+    }
+    // Peak day of week
+    const dowCounts = [0,0,0,0,0,0,0];
+    for (const d of sortedDays) { dowCounts[new Date(d).getDay()]++; }
+    const dowNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const peakDow = dowNames[dowCounts.indexOf(Math.max(...dowCounts))];
+    // Build 12-week grid data (84 cells, Sun=0)
+    const gridData: number[] = [];
+    const gridStart = new Date(Date.now() - 83 * 86400000);
+    gridStart.setHours(0,0,0,0);
+    for (let i = 0; i < 84; i++) {
+      const d = new Date(gridStart.getTime() + i * 86400000).toISOString().slice(0, 10);
+      gridData.push(dayCounts[d] ?? 0);
+    }
+    const provider = cfg<string>('provider', 'openrouter');
+    const model    = cfg<string>('model', '');
+    const version  = (this.ctx.extension.packageJSON as {version:string}).version;
+    this.post({
+      type: 'statsData',
+      sessions: all.length,
+      messages: totalMsgs,
+      activeDays: daySet.size,
+      streak,
+      longestStreak,
+      peakDay: peakDow,
+      gridData,
+      provider,
+      model,
+      version,
+    });
+  }
+
 
   private pushHistory(): void {
     const items = this.sessions.historyItems.map(s => ({

@@ -510,6 +510,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  position: relative; /* needed so .cd-menu positions relative to composer */
 }
 
 /* Attachment chips row */
@@ -663,15 +664,16 @@ html, body {
 /* Context attach dropdown */
 .cd-menu {
   position: absolute;
-  bottom: calc(100% + 4px);
-  left: 0;
-  z-index: 50;
+  /* Relative to .cd-composer (which now has position:relative) */
+  bottom: calc(100% + 2px);
+  left: 8px;
+  z-index: 999;
   min-width: 195px;
   max-width: 270px;
   background: var(--vscode-menu-background, var(--vscode-sideBar-background));
   border: 1px solid var(--bd2);
   border-radius: var(--r);
-  box-shadow: 0 6px 22px rgba(0,0,0,.28);
+  box-shadow: 0 6px 22px rgba(0,0,0,.40);
   overflow: hidden;
   display: none;
 }
@@ -756,6 +758,24 @@ html, body {
   letter-spacing: -0.02em;
   color: var(--vscode-foreground);
 }
+
+/* Bigger close/X button for settings panel */
+.cd-close-btn {
+  width: 28px !important;
+  height: 28px !important;
+  font-size: 18px !important;
+  opacity: 0.75 !important;
+}
+.cd-close-btn:hover { opacity: 1 !important; }
+
+/* Bigger close/X button for settings panel */
+.cd-close-btn {
+  width: 28px !important;
+  height: 28px !important;
+  font-size: 18px !important;
+  opacity: 0.75 !important;
+}
+.cd-close-btn:hover { opacity: 1 !important; }
 
 /* Middle: nav + content side by side */
 .cd-panel-layout {
@@ -1258,6 +1278,18 @@ html, body {
   padding: 2px 3px !important;
   transition: transform .2s;
 }
+.cd-chevron-lg {
+  font-size: 14px !important;
+  width: 26px !important;
+  height: 26px !important;
+  opacity: 0.8 !important;
+}
+.cd-chevron-lg {
+  font-size: 14px !important;
+  width: 26px !important;
+  height: 26px !important;
+  opacity: 0.8 !important;
+}
 
 /* ── File-create action bar ─────────────────────────────────────────── */
 .cd-file-actions {
@@ -1313,3 +1345,209 @@ html, body {
   align-items: center;
 }
 .cd-fa-dim { opacity: 0.55; font-size: 10px; }
+
+/* ── Code block auto-collapse ────────────────────────────────────────── */
+.cd-code-collapsed pre {
+  display: none;
+}
+.cd-code-collapsed.expanded pre {
+  display: block;
+}
+
+.cd-code-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  margin: 4px 0;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--bd2);
+  background: var(--vscode-editor-background, rgba(0,0,0,.22));
+  color: var(--vscode-descriptionForeground);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+.cd-code-toggle:hover {
+  background: rgba(127,127,127,.15);
+  border-color: var(--acc-bd);
+  color: var(--vscode-foreground);
+}
+.cd-ct-icon { font-size: 9px; }
+.cd-ct-meta {
+  font-size: 10px;
+  opacity: 0.6;
+  font-weight: 400;
+}
+
+/* ── Stats page ──────────────────────────────────────────────────────── */
+.cd-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.cd-stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 6px 8px;
+  border-radius: var(--r);
+  border: 1px solid var(--bd);
+  background: rgba(127,127,127,.04);
+  text-align: center;
+  gap: 3px;
+}
+
+.cd-stat-val {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--acc);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.cd-stat-lbl {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--vscode-descriptionForeground);
+  font-weight: 600;
+}
+
+/* Activity grid (84 cells = 12 weeks × 7 days) */
+.cd-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.cd-activity-cell {
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: rgba(127,127,127,.1);
+  transition: background 0.1s;
+}
+.cd-activity-cell[data-level="0"] { background: rgba(127,127,127,.08); }
+.cd-activity-cell[data-level="1"] { background: rgba(217,119,87,.25); }
+.cd-activity-cell[data-level="2"] { background: rgba(217,119,87,.45); }
+.cd-activity-cell[data-level="3"] { background: rgba(217,119,87,.70); }
+.cd-activity-cell[data-level="4"] { background: var(--acc); }
+
+.cd-stats-caption {
+  font-size: 9.5px;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.6;
+  margin-top: 5px;
+  text-align: center;
+}
+
+/* ── Code block auto-collapse ────────────────────────────────────────── */
+.cd-code-collapsed pre {
+  display: none;
+}
+.cd-code-collapsed.expanded pre {
+  display: block;
+}
+
+.cd-code-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  margin: 4px 0;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--bd2);
+  background: var(--vscode-editor-background, rgba(0,0,0,.22));
+  color: var(--vscode-descriptionForeground);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+.cd-code-toggle:hover {
+  background: rgba(127,127,127,.15);
+  border-color: var(--acc-bd);
+  color: var(--vscode-foreground);
+}
+.cd-ct-icon { font-size: 9px; }
+.cd-ct-meta {
+  font-size: 10px;
+  opacity: 0.6;
+  font-weight: 400;
+}
+
+/* ── Stats page ──────────────────────────────────────────────────────── */
+.cd-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.cd-stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 6px 8px;
+  border-radius: var(--r);
+  border: 1px solid var(--bd);
+  background: rgba(127,127,127,.04);
+  text-align: center;
+  gap: 3px;
+}
+
+.cd-stat-val {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--acc);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.cd-stat-lbl {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--vscode-descriptionForeground);
+  font-weight: 600;
+}
+
+/* Activity grid (84 cells = 12 weeks × 7 days) */
+.cd-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.cd-activity-cell {
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: rgba(127,127,127,.1);
+  transition: background 0.1s;
+}
+.cd-activity-cell[data-level="0"] { background: rgba(127,127,127,.08); }
+.cd-activity-cell[data-level="1"] { background: rgba(217,119,87,.25); }
+.cd-activity-cell[data-level="2"] { background: rgba(217,119,87,.45); }
+.cd-activity-cell[data-level="3"] { background: rgba(217,119,87,.70); }
+.cd-activity-cell[data-level="4"] { background: var(--acc); }
+
+.cd-stats-caption {
+  font-size: 9.5px;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.6;
+  margin-top: 5px;
+  text-align: center;
+}

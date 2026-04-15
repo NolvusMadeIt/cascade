@@ -80,6 +80,7 @@ const selFileScope    = el<HTMLSelectElement>('selFileScope');
 const chkTerminal     = el<HTMLInputElement>('chkTerminal');
 const chkGit          = el<HTMLInputElement>('chkGit');
 const chkFreeOnly     = el<HTMLInputElement>('chkFreeOnly');
+const chkAutoHideCode = opt<HTMLInputElement>('chkAutoHideCode');
 
 // History
 const historyClose    = el<HTMLButtonElement>('historyClose');
@@ -134,6 +135,7 @@ type TabItem  = { id: string; title: string };
 
 let busy         = false;
 let mode: ChatMode = 'agent';
+let autoHideCode = true; // matches cascade.autoHideCode default
 let activeSession = '';
 let tabs: TabItem[] = [];
 let histItems: HistItem[] = [];
@@ -356,6 +358,28 @@ function stripThink(text: string): { visible: string; thinking: string } {
 function addCodeActions(root: HTMLElement): void {
   root.querySelectorAll('pre').forEach((pre) => {
     if (pre.querySelector('.cd-code-acts')) return;
+
+    // Auto-collapse code blocks if the setting is enabled
+    if (autoHideCode && !pre.closest('.cd-code-collapsed')) {
+      const codeEl2 = pre.querySelector('code');
+      const lineCount = (codeEl2?.textContent ?? '').split('\n').length;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'cd-code-collapsed';
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'cd-code-toggle';
+      toggle.innerHTML = `<span class="cd-ct-icon">&#9654;</span> Show code <span class="cd-ct-meta">${lineCount} line${lineCount===1?'':'s'}</span>`;
+      toggle.addEventListener('click', () => {
+        const expanded = wrapper.classList.toggle('expanded');
+        const icon = toggle.querySelector<HTMLElement>('.cd-ct-icon')!;
+        icon.innerHTML = expanded ? '&#9660;' : '&#9654;';
+        toggle.querySelector<HTMLElement>('.cd-ct-meta')!.textContent = expanded ? 'hide' : `${lineCount} line${lineCount===1?'':'s'}`;
+      });
+      pre.parentNode?.insertBefore(wrapper, pre);
+      wrapper.appendChild(toggle);
+      wrapper.appendChild(pre);
+    }
+
     const acts = document.createElement('div');
     acts.className = 'cd-code-acts';
 
@@ -546,6 +570,7 @@ document.querySelectorAll<HTMLButtonElement>('.cd-nav-item[data-page]').forEach(
     document.querySelectorAll('.cd-settings-page').forEach(p => p.classList.remove('active'));
     const pageEl = document.getElementById('page' + page.charAt(0).toUpperCase() + page.slice(1));
     if (pageEl) pageEl.classList.add('active');
+    if (page === 'stats') vscode.postMessage({ type: 'getStats' });
   });
 });
 
@@ -587,6 +612,7 @@ settingsSave.addEventListener('click', () => {
     userName:        inpUserName    ? inpUserName.value.trim()    : '',
     systemPrompt:    inpSystemPrompt ? inpSystemPrompt.value.trim() : '',
     historyRetention: selHistory ? selHistory.value : 'unlimited',
+    autoHideCode:     chkAutoHideCode?.checked ?? true,
   });
   showToast();
   setTimeout(closeSettings, 900);
@@ -782,6 +808,8 @@ window.addEventListener('message', ({ data }) => {
       if (inpSystemPrompt) inpSystemPrompt.value = String(m2.systemPrompt ?? '');
       // Privacy
       if (selHistory) selHistory.value = String(m2.historyRetention ?? 'unlimited');
+      // Chat display
+      if (chkAutoHideCode) { chkAutoHideCode.checked = m2.autoHideCode !== false; autoHideCode = m2.autoHideCode !== false; }
       // Clear validation errors
       inpTemp.classList.remove('err');
       inpTopP.classList.remove('err');
@@ -797,6 +825,37 @@ window.addEventListener('message', ({ data }) => {
         : [];
       renderChips();
       break;
+
+    case 'statsData': {
+      const sd = msg as Record<string,unknown>;
+      const setTxt = (id: string, v: unknown) => { const e = document.getElementById(id); if (e) e.textContent = String(v ?? '—'); };
+      setTxt('statSessions', sd.sessions);
+      setTxt('statMessages', (sd.messages as number) >= 1000 ? ((sd.messages as number)/1000).toFixed(1)+'k' : String(sd.messages));
+      setTxt('statActiveDays', sd.activeDays);
+      setTxt('statStreak', (sd.streak as number) + 'd');
+      setTxt('statLongestStreak', (sd.longestStreak as number) + 'd');
+      setTxt('statPeakDay', sd.peakDay);
+      setTxt('statProvider', sd.provider);
+      setTxt('statModel', (sd.model as string)?.split('/').pop() ?? '—');
+      setTxt('aboutVersion', 'v' + (sd.version ?? '—'));
+      // Build activity grid
+      const grid = document.getElementById('activityGrid');
+      const caption = document.getElementById('statsCaption');
+      if (grid && Array.isArray(sd.gridData)) {
+        grid.innerHTML = '';
+        const maxVal = Math.max(1, ...(sd.gridData as number[]));
+        (sd.gridData as number[]).forEach((v: number) => {
+          const cell = document.createElement('div');
+          cell.className = 'cd-activity-cell';
+          const intensity = v === 0 ? 0 : Math.ceil((v / maxVal) * 4);
+          cell.dataset.level = String(intensity);
+          cell.title = v + ' msgs';
+          grid.appendChild(cell);
+        });
+        if (caption) caption.textContent = `${sd.activeDays} active day${(sd.activeDays as number) === 1 ? '' : 's'} in the last 12 weeks`;
+      }
+      break;
+    }
 
     case 'filesAutoCreated': {
       // Show an inline "files created" notice below the last assistant message
