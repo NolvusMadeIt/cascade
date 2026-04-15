@@ -369,6 +369,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
       vscode.commands.executeCommand('cascade.panel.focus')),
     vscode.commands.registerCommand('cascade.focusSecondary', () =>
       vscode.commands.executeCommand('cascade.secondary.focus')),
+    vscode.commands.registerCommand('cascade.showTasks', () =>
+      vscode.commands.executeCommand('cascade.tasks.focus')),
   );
   // Background startup checks — endpoint health + update availability
   setTimeout(() => {
@@ -407,7 +409,7 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
     const nonce     = getNonce();
     const scriptUri = wv.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'dist', 'chat.js'));
     const styleUri  = wv.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'chat.css'));
-    const iconUri   = wv.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'icon.svg'));
+    const iconUri   = wv.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'cascade-icon.svg'));
     const logoUri   = wv.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'cascade-logo.svg'));
 
     const provider = cfg<Provider>('provider', 'openrouter');
@@ -1086,6 +1088,26 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
     const session = this.sessions.active;
     if (!session) return;
 
+    // Auto-include open editor files as context (like Copilot / Claude Code)
+    const fileAccess = cfg<string>('fileAccess', 'readwrite');
+    if (fileAccess !== 'none' && wsFolder) {
+      const wsRoot = wsFolder.uri.fsPath;
+      const openDocs = vscode.workspace.textDocuments.filter(d =>
+        !d.isUntitled &&
+        d.uri.scheme === 'file' &&
+        d.uri.fsPath.startsWith(wsRoot) &&
+        d.getText().length > 0 &&
+        d.getText().length < 80000
+      );
+      if (openDocs.length) {
+        const fileParts = openDocs.map(d => {
+          const rel = d.uri.fsPath.slice(wsRoot.length).replace(/\\/g, '/').replace(/^\//, '');
+          return `<file path="${rel}">\n${d.getText()}\n</file>`;
+        });
+        userText = `<workspace_context>\n${fileParts.join('\n')}\n</workspace_context>\n\n${userText}`;
+      }
+    }
+
     const key = await this.getKey(provider);
     if (!key) {
       this.post({ type: 'assistantError', text: `No API key for ${provider}. Open ⚙ Settings to add your free key.` });
@@ -1154,10 +1176,14 @@ class CascadeViewProvider implements vscode.WebviewViewProvider {
               await vscode.workspace.fs.writeFile(fileUri, Buffer.from(fb.code, 'utf8'));
               created.push(fb.name);
               if (!firstUri) firstUri = fileUri;
-            } catch { /* individual file errors are non-fatal */ }
+            } catch (writeErr) {
+              const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
+              void vscode.window.showErrorMessage(`Cascade: Failed to write "${fb.name}": ${msg}`);
+            }
           }
           if (created.length) {
             if (firstUri) { void vscode.window.showTextDocument(firstUri, { preview: false }); }
+            void vscode.window.showInformationMessage(`Cascade wrote ${created.length} file${created.length > 1 ? 's' : ''}: ${created.join(', ')}`);
             this.post({ type: 'filesAutoCreated', files: created });
           }
         } else {
